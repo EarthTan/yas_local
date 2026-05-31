@@ -115,21 +115,30 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
   String _formatError(Object e) {
     if (e is DioException) {
       final status = e.response?.statusCode;
+      // ← Expose the ACTUAL URL Dio constructed — this is the key diagnostic info
+      final actualUrl = e.requestOptions.uri.toString();
       final body = e.response?.data?.toString() ?? '';
-      final snippet = body.length > 200 ? '${body.substring(0, 200)}…' : body;
-      return switch (status) {
-        401 => 'API Key 无效（401 Unauthorized）\n请到「设置」检查 Key 是否正确。',
-        403 => 'API Key 权限不足（403 Forbidden）\n$snippet',
-        404 => 'API 地址不存在（404 Not Found）\n请检查 Base URL 格式，应为：\nhttps://api.xxx.com/v1',
-        422 => '请求格式有误（422 Unprocessable）\n$snippet',
-        429 => '请求过于频繁（429 Rate Limited）\n请稍后重试。',
-        500 || 502 || 503 => '服务器错误（$status）\n$snippet',
-        null => '网络错误：${e.message ?? e.type.name}',
-        _ => 'API 返回错误 $status\n$snippet',
+      final snippet = body.length > 300 ? '${body.substring(0, 300)}…' : body;
+
+      final header = switch (status) {
+        401 => '❌ API Key 无效（401 Unauthorized）',
+        403 => '❌ 权限不足（403 Forbidden）',
+        404 => '❌ 接口不存在（404 Not Found）',
+        422 => '❌ 请求格式有误（422 Unprocessable）',
+        429 => '❌ 请求过频（429 Rate Limit）',
+        500 || 502 || 503 => '❌ 服务器错误（$status）',
+        null => '❌ 网络错误：${e.message ?? e.type.name}',
+        _ => '❌ HTTP $status',
       };
+
+      return [
+        header,
+        '实际请求 URL：\n$actualUrl',
+        if (snippet.isNotEmpty) '服务器返回：\n$snippet',
+      ].join('\n\n');
     }
     final msg = e.toString();
-    return '批改出错：${msg.length > 300 ? '${msg.substring(0, 300)}…' : msg}';
+    return '批改出错：${msg.length > 400 ? '${msg.substring(0, 400)}…' : msg}';
   }
 }
 
