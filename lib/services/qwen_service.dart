@@ -50,7 +50,10 @@ class QwenService {
     final qs = (parsed?['questions'] as List? ?? []);
     return qs
         .map((q) => OcrQuestion(
-              q['number'] as int,
+              // Models may return number as int or string — handle both
+              q['number'] is int
+                  ? q['number'] as int
+                  : int.tryParse(q['number'].toString()) ?? 0,
               (q['student_answer'] ?? '').toString(),
               (q['type'] ?? 'objective').toString(),
             ))
@@ -98,12 +101,18 @@ class QwenService {
     return _extractJson(content) ?? {'correct': false, 'confidence': 0.0};
   }
 
+  /// Strip `<think>...</think>` blocks emitted by reasoning models (Qwen3, DeepSeek-R1, etc.)
+  /// before attempting JSON extraction, otherwise the first `{` lands inside the thinking block.
+  String _stripThinking(String text) =>
+      text.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
+
   Map<String, dynamic>? _extractJson(String text) {
-    final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
+    final cleaned = _stripThinking(text);
+    final start = cleaned.indexOf('{');
+    final end = cleaned.lastIndexOf('}');
     if (start == -1 || end == -1 || end <= start) return null;
     try {
-      return jsonDecode(text.substring(start, end + 1)) as Map<String, dynamic>;
+      return jsonDecode(cleaned.substring(start, end + 1)) as Map<String, dynamic>;
     } catch (_) {
       return null;
     }

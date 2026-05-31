@@ -36,15 +36,34 @@ class _S extends ConsumerState<GradingScreen> {
             if (p.error != null) ...[
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
-              Text(p.error!, textAlign: TextAlign.center),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: SelectableText(
+                  p.error!,
+                  textAlign: TextAlign.left,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ),
               const SizedBox(height: 16),
-              FilledButton(onPressed: () => context.go('/settings'), child: const Text('去设置')),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                FilledButton(onPressed: () => context.go('/settings'), child: const Text('去设置')),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () => context.pushReplacement('/tasks/${widget.taskId}/results'),
+                  child: const Text('查看结果'),
+                ),
+              ]),
             ] else ...[
               Text('${p.done} / ${p.total} 份已批改', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               LinearProgressIndicator(value: p.total > 0 ? p.done / p.total : null),
               const SizedBox(height: 16),
-              const Text('正在调用 Qwen 识别与评分，请稍候…', style: TextStyle(color: Colors.grey)),
+              const Text('正在识别与评分，请稍候…', style: TextStyle(color: Colors.grey)),
             ],
           ]),
         ),

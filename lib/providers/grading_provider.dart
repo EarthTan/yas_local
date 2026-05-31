@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/submission.dart';
 import '../models/rubric.dart';
@@ -50,6 +51,8 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
     // Clear any previous error and start fresh
     state = GradingProgress(total: subs.length, done: 0, running: true);
 
+    String? firstApiError;
+
     for (final sub in subs) {
       try {
         await notifier.updateSubmission(sub.copyWith(status: SubmissionStatus.processing));
@@ -68,10 +71,17 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
             sub.copyWith(status: SubmissionStatus.done, items: items));
       } catch (e) {
         await notifier.updateSubmission(sub.copyWith(status: SubmissionStatus.failed));
+        firstApiError ??= _formatError(e);
       }
       state = state.copyWith(done: state.done + 1);
     }
-    state = state.copyWith(running: false);
+
+    // Expose the actual error so the UI can show it instead of silently failing.
+    if (firstApiError != null) {
+      state = state.copyWith(running: false, error: firstApiError);
+    } else {
+      state = state.copyWith(running: false);
+    }
   }
 
   Future<GradedItem> _gradeObjective(QwenService qwen, RubricItem r, String ans) async {
@@ -100,6 +110,26 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
       aiComment: d['comment'] as String?,
       confidence: (d['confidence'] as num?)?.toDouble() ?? 0.0,
     );
+  }
+
+  String _formatError(Object e) {
+    if (e is DioException) {
+      final status = e.response?.statusCode;
+      final body = e.response?.data?.toString() ?? '';
+      final snippet = body.length > 200 ? '${body.substring(0, 200)}…' : body;
+      return switch (status) {
+        401 => 'API Key 无效（401 Unauthorized）\n请到「设置」检查 Key 是否正确。',
+        403 => 'API Key 权限不足（403 Forbidden）\n$snippet',
+        404 => 'API 地址不存在（404 Not Found）\n请检查 Base URL 格式，应为：\nhttps://api.xxx.com/v1',
+        422 => '请求格式有误（422 Unprocessable）\n$snippet',
+        429 => '请求过于频繁（429 Rate Limited）\n请稍后重试。',
+        500 || 502 || 503 => '服务器错误（$status）\n$snippet',
+        null => '网络错误：${e.message ?? e.type.name}',
+        _ => 'API 返回错误 $status\n$snippet',
+      };
+    }
+    final msg = e.toString();
+    return '批改出错：${msg.length > 300 ? '${msg.substring(0, 300)}…' : msg}';
   }
 }
 
