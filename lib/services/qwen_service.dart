@@ -16,11 +16,25 @@ class QwenService {
 
   QwenService(this.settings)
       : _dio = Dio(BaseOptions(
-          baseUrl: settings.baseUrl,
+          baseUrl: _normalizeBaseUrl(settings.baseUrl),
           connectTimeout: const Duration(seconds: 30),
           receiveTimeout: const Duration(seconds: 120),
           headers: {'Authorization': 'Bearer ${settings.apiKey}'},
         ));
+
+  /// Users often paste the full endpoint URL from API docs
+  /// (e.g. "https://api.foo.com/v1/chat/completions") instead of just the base.
+  /// Strip any common endpoint suffixes so the code-appended path doesn't double up.
+  static String _normalizeBaseUrl(String url) {
+    url = url.trim().replaceAll(RegExp(r'/+$'), ''); // drop trailing slashes
+    const knownSuffixes = ['/chat/completions', '/completions', '/embeddings'];
+    for (final suffix in knownSuffixes) {
+      if (url.endsWith(suffix)) {
+        return url.substring(0, url.length - suffix.length);
+      }
+    }
+    return url;
+  }
 
   Future<List<OcrQuestion>> ocrPaper(String imagePath) async {
     final bytes = await File(imagePath).readAsBytes();

@@ -52,7 +52,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: [
           TextField(controller: _key, decoration: const InputDecoration(labelText: 'Qwen API Key', border: OutlineInputBorder()), obscureText: true),
           const SizedBox(height: 16),
-          TextField(controller: _base, decoration: const InputDecoration(labelText: 'Base URL', border: OutlineInputBorder())),
+          TextField(
+            controller: _base,
+            decoration: const InputDecoration(
+              labelText: 'Base URL',
+              hintText: 'https://api.example.com/v1',
+              helperText: '填写到 /v1 为止，无需包含 /chat/completions',
+              helperMaxLines: 2,
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 16),
           TextField(controller: _vl, decoration: const InputDecoration(labelText: '视觉模型（识别）', border: OutlineInputBorder())),
           const SizedBox(height: 16),
