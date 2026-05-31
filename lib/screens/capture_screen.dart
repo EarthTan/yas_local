@@ -20,13 +20,35 @@ class _S extends ConsumerState<CaptureScreen> {
   bool _busy = false;
 
   Future<void> _shoot() async {
-    final x = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
-    if (x != null) setState(() => _photos.add(File(x.path)));
+    if (Platform.isMacOS) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('macOS 不支持直接拍照，请点击「相册」选择图片文件')),
+        );
+      }
+      return;
+    }
+    try {
+      final x = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+      if (x != null && mounted) setState(() => _photos.add(File(x.path)));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('相机出错：$e')));
+      }
+    }
   }
 
   Future<void> _pick() async {
-    final xs = await _picker.pickMultiImage(imageQuality: 85);
-    if (xs.isNotEmpty) setState(() => _photos.addAll(xs.map((e) => File(e.path))));
+    try {
+      final xs = await _picker.pickMultiImage(imageQuality: 85);
+      if (xs.isNotEmpty && mounted) {
+        setState(() => _photos.addAll(xs.map((e) => File(e.path))));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('选择图片失败：$e')));
+      }
+    }
   }
 
   Future<void> _start() async {
