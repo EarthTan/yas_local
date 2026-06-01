@@ -1,26 +1,48 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/submission.dart';
+import '../models/checkpoint.dart';
 import '../models/rubric.dart';
+import '../models/reference_answer.dart';
 import '../services/qwen_service.dart';
+import '../services/reference_store.dart';
 import 'settings_provider.dart';
 import 'task_provider.dart';
 
+enum GradingPhase { referenceGen, grading }
+
 class GradingProgress {
+  final GradingPhase phase;
+  final int refTotal;
+  final int refDone;
   final int total;
   final int done;
   final bool running;
   final String? error;
-  const GradingProgress({this.total = 0, this.done = 0, this.running = false, this.error});
 
-  // Use a sentinel to allow clearing error back to null
+  const GradingProgress({
+    this.phase = GradingPhase.referenceGen,
+    this.refTotal = 0,
+    this.refDone = 0,
+    this.total = 0,
+    this.done = 0,
+    this.running = false,
+    this.error,
+  });
+
   GradingProgress copyWith({
+    GradingPhase? phase,
+    int? refTotal,
+    int? refDone,
     int? total,
     int? done,
     bool? running,
     Object? error = _keep,
   }) =>
       GradingProgress(
+        phase: phase ?? this.phase,
+        refTotal: refTotal ?? this.refTotal,
+        refDone: refDone ?? this.refDone,
         total: total ?? this.total,
         done: done ?? this.done,
         running: running ?? this.running,
@@ -44,38 +66,125 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
     final task = notifier.taskById(taskId);
     if (task == null) return;
     final subs = notifier.submissionsFor(taskId);
-    final rubricByNum = {for (final r in task.rubric) r.questionNumber: r};
     final qwen = QwenService(settings);
 
-    // Clear any previous error and start fresh
-    state = GradingProgress(total: subs.length, done: 0, running: true);
+    // ── Phase 1: Reference answer generation (cached per task) ──
+    state = GradingProgress(
+      phase: GradingPhase.referenceGen,
+      refTotal: task.rubric.length,
+      refDone: 0,
+      running: true,
+    );
 
     String? firstApiError;
 
+    final cached = await ReferenceStore.load(taskId);
+    final cachedByNum = {for (final r in cached) r.questionNumber: r};
+    final references = <ReferenceAnswer>[];
+
+    for (final rubricItem in task.rubric) {
+      if (cachedByNum.containsKey(rubricItem.questionNumber)) {
+        references.add(cachedByNum[rubricItem.questionNumber]!);
+      } else {
+        try {
+          ReferenceAnswer refAnswer;
+          if (rubricItem.correctAnswer != null) {
+            refAnswer = await qwen.generateReferenceWithAnswer(rubricItem);
+          } else {
+            final images = _pickSampleImages(subs);
+            if (images.isEmpty) {
+              refAnswer = ReferenceAnswer(
+                  questionNumber: rubricItem.questionNumber,
+                  checkpoints: [],
+                  hasConsensus: false);
+            } else {
+              refAnswer =
+                  await qwen.generateReferenceFromImages(rubricItem, images);
+            }
+          }
+          references.add(refAnswer);
+        } catch (e) {
+          firstApiError ??= _formatError(e);
+          references.add(ReferenceAnswer(
+              questionNumber: rubricItem.questionNumber,
+              checkpoints: [],
+              hasConsensus: false));
+        }
+      }
+      state = state.copyWith(refDone: state.refDone + 1);
+    }
+
+    await ReferenceStore.save(taskId, references);
+
+    if (firstApiError != null) {
+      state = state.copyWith(running: false, error: firstApiError);
+      return;
+    }
+
+    // ── Phase 2: Batch grading (rubric-first) ──
+    final referenceByNum = {for (final r in references) r.questionNumber: r};
+
+    state = state.copyWith(
+      phase: GradingPhase.grading,
+      total: subs.length,
+      done: 0,
+    );
+
     for (final sub in subs) {
       try {
-        await notifier.updateSubmission(sub.copyWith(status: SubmissionStatus.processing));
+        await notifier.updateSubmission(
+            sub.copyWith(status: SubmissionStatus.processing));
         final ocr = await qwen.ocrPaper(sub.imagePath!);
+        final ocrByNum = {for (final q in ocr) q.number: q.studentAnswer};
+
         final items = <GradedItem>[];
-        for (final q in ocr) {
-          final r = rubricByNum[q.number];
-          if (r == null) continue;
-          if (r.type == 'objective') {
-            items.add(await _gradeObjective(qwen, r, q.studentAnswer));
-          } else {
-            items.add(await _gradeSubjective(qwen, r, q.studentAnswer));
+        for (final rubricItem in task.rubric) {
+          final studentAnswer = ocrByNum[rubricItem.questionNumber] ?? '';
+          final refAnswer = referenceByNum[rubricItem.questionNumber];
+
+          if (studentAnswer.isEmpty) {
+            items.add(_zeroItem(rubricItem, refAnswer));
+            continue;
           }
+
+          if (refAnswer == null || refAnswer.checkpoints.isEmpty) {
+            items.add(GradedItem(
+              questionNumber: rubricItem.questionNumber,
+              type: rubricItem.type,
+              extractedAnswer: studentAnswer,
+              aiScore: 0,
+              confidence: 0.5,
+            ));
+            continue;
+          }
+
+          final grade = await qwen.gradeAgainstReference(
+            rubric: rubricItem,
+            ref: refAnswer,
+            studentAnswer: studentAnswer,
+          );
+          items.add(GradedItem(
+            questionNumber: rubricItem.questionNumber,
+            type: rubricItem.type,
+            extractedAnswer: studentAnswer,
+            checkpoints: grade.checkpoints,
+            aiScore: grade.checkpoints
+                .fold<int>(0, (sum, c) => sum + c.pointsAwarded),
+            aiComment: grade.overallComment,
+            confidence: grade.confidence,
+          ));
         }
+
         await notifier.updateSubmission(
             sub.copyWith(status: SubmissionStatus.done, items: items));
       } catch (e) {
-        await notifier.updateSubmission(sub.copyWith(status: SubmissionStatus.failed));
+        await notifier.updateSubmission(
+            sub.copyWith(status: SubmissionStatus.failed));
         firstApiError ??= _formatError(e);
       }
       state = state.copyWith(done: state.done + 1);
     }
 
-    // Expose the actual error so the UI can show it instead of silently failing.
     if (firstApiError != null) {
       state = state.copyWith(running: false, error: firstApiError);
     } else {
@@ -83,41 +192,43 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
     }
   }
 
-  Future<GradedItem> _gradeObjective(QwenService qwen, RubricItem r, String ans) async {
-    if (r.correctAnswer != null) {
-      final res = gradeObjectiveByKey(student: ans, correct: r.correctAnswer!, maxPoints: r.maxPoints);
-      return GradedItem(
-        questionNumber: r.questionNumber, type: 'objective', extractedAnswer: ans,
-        aiScore: res.score, confidence: res.confidence,
-      );
-    }
-    final j = await qwen.judgeObjective(question: r.questionText, studentAnswer: ans, maxPoints: r.maxPoints);
-    final correct = j['correct'] == true;
-    return GradedItem(
-      questionNumber: r.questionNumber, type: 'objective', extractedAnswer: ans,
-      aiScore: correct ? r.maxPoints : 0,
-      confidence: (j['confidence'] as num?)?.toDouble() ?? 0.5,
-    );
+  List<String> _pickSampleImages(List<Submission> subs) {
+    final paths = subs
+        .where((s) => s.imagePath != null)
+        .map((s) => s.imagePath!)
+        .toList();
+    if (paths.length <= 5) return paths;
+    final step = paths.length ~/ 5;
+    return [for (int i = 0; i < 5; i++) paths[i * step]];
   }
 
-  Future<GradedItem> _gradeSubjective(QwenService qwen, RubricItem r, String ans) async {
-    final d = await qwen.gradeSubjective(
-        question: r.questionText, criteria: r.criteria, maxPoints: r.maxPoints, studentAnswer: ans);
+  GradedItem _zeroItem(RubricItem rubricItem, ReferenceAnswer? refAnswer) {
+    final checkpoints = refAnswer?.checkpoints
+            .map((c) => CheckpointResult(
+                  description: c.description,
+                  passed: false,
+                  pointsAwarded: 0,
+                  reason: '未作答',
+                ))
+            .toList() ??
+        [];
     return GradedItem(
-      questionNumber: r.questionNumber, type: 'subjective', extractedAnswer: ans,
-      aiScore: (d['score'] as num?)?.toInt() ?? 0,
-      aiComment: d['comment'] as String?,
-      confidence: (d['confidence'] as num?)?.toDouble() ?? 0.0,
+      questionNumber: rubricItem.questionNumber,
+      type: rubricItem.type,
+      extractedAnswer: '',
+      checkpoints: checkpoints,
+      aiScore: 0,
+      confidence: 1.0,
     );
   }
 
   String _formatError(Object e) {
     if (e is DioException) {
       final status = e.response?.statusCode;
-      // ← Expose the ACTUAL URL Dio constructed — this is the key diagnostic info
       final actualUrl = e.requestOptions.uri.toString();
       final body = e.response?.data?.toString() ?? '';
-      final snippet = body.length > 300 ? '${body.substring(0, 300)}…' : body;
+      final snippet =
+          body.length > 300 ? '${body.substring(0, 300)}…' : body;
 
       final header = switch (status) {
         401 => '❌ API Key 无效（401 Unauthorized）',
@@ -141,5 +252,5 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
   }
 }
 
-final gradingProvider =
-    StateNotifierProvider<GradingNotifier, GradingProgress>((ref) => GradingNotifier(ref));
+final gradingProvider = StateNotifierProvider<GradingNotifier, GradingProgress>(
+    (ref) => GradingNotifier(ref));
