@@ -4,6 +4,7 @@ import 'package:yas_local/models/task.dart';
 import 'package:yas_local/models/submission.dart';
 import 'package:yas_local/models/checkpoint.dart';
 import 'package:yas_local/models/reference_answer.dart';
+import 'package:yas_local/models/identified_question.dart';
 
 void main() {
   test('RubricItem JSON 往返', () {
@@ -89,5 +90,33 @@ void main() {
       hasConsensus: false,
     );
     expect(ReferenceAnswer.fromJson(ref.toJson()).hasConsensus, false);
+  });
+
+  group('IdentifiedQuestion', () {
+    test('fromJson parses correctly', () {
+      final q = IdentifiedQuestion.fromJson({
+        'number': 2,
+        'text': '什么是光合作用？',
+        'type': 'subjective',
+      });
+      expect(q.number, 2);
+      expect(q.questionText, '什么是光合作用？');
+      expect(q.type, 'subjective');
+    });
+
+    test('fromJson handles string number', () {
+      final q = IdentifiedQuestion.fromJson({
+        'number': '3',
+        'text': 'Q',
+        'type': 'objective',
+      });
+      expect(q.number, 3);
+    });
+
+    test('fromJson defaults missing fields', () {
+      final q = IdentifiedQuestion.fromJson({'number': 1});
+      expect(q.questionText, '');
+      expect(q.type, 'subjective');
+    });
   });
 }
