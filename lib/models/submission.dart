@@ -1,7 +1,10 @@
+import 'checkpoint.dart';
+
 class GradedItem {
   final int questionNumber;
   final String type;
   final String? extractedAnswer;
+  final List<CheckpointResult> checkpoints;
   final int? aiScore;
   final String? aiComment;
   final double? confidence;
@@ -11,6 +14,7 @@ class GradedItem {
     required this.questionNumber,
     required this.type,
     this.extractedAnswer,
+    this.checkpoints = const [],
     this.aiScore,
     this.aiComment,
     this.confidence,
@@ -30,6 +34,7 @@ class GradedItem {
         questionNumber: questionNumber,
         type: type,
         extractedAnswer: extractedAnswer,
+        checkpoints: checkpoints,
         aiScore: aiScore,
         aiComment: aiComment,
         confidence: confidence,
@@ -40,6 +45,7 @@ class GradedItem {
         'questionNumber': questionNumber,
         'type': type,
         'extractedAnswer': extractedAnswer,
+        'checkpoints': checkpoints.map((c) => c.toJson()).toList(),
         'aiScore': aiScore,
         'aiComment': aiComment,
         'confidence': confidence,
@@ -50,6 +56,9 @@ class GradedItem {
         questionNumber: json['questionNumber'] as int,
         type: json['type'] as String,
         extractedAnswer: json['extractedAnswer'] as String?,
+        checkpoints: (json['checkpoints'] as List? ?? [])
+            .map((e) => CheckpointResult.fromJson(e as Map<String, dynamic>))
+            .toList(),
         aiScore: json['aiScore'] as int?,
         aiComment: json['aiComment'] as String?,
         confidence: (json['confidence'] as num?)?.toDouble(),
