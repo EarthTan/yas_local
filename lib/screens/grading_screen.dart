@@ -25,7 +25,6 @@ class _S extends ConsumerState<GradingScreen> {
     ref.listen(gradingProvider, (prev, next) {
       if (!next.running &&
           next.error == null &&
-          next.phase == GradingPhase.grading &&
           next.total > 0 &&
           next.done == next.total) {
         context.pushReplacement('/tasks/${widget.taskId}/results');
