@@ -61,7 +61,14 @@ class _S extends ConsumerState<CaptureScreen> {
       subs.add(Submission(id: id, taskId: widget.taskId, label: '第 ${i + 1} 份', imagePath: path));
     }
     await ref.read(taskProvider.notifier).setSubmissions(widget.taskId, subs);
-    if (mounted) context.pushReplacement('/tasks/${widget.taskId}/strategy');
+    if (!mounted) return;
+    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
+    final hasRubric = task != null && task.rubric.isNotEmpty;
+    context.pushReplacement(
+      hasRubric
+          ? '/tasks/${widget.taskId}/strategy'
+          : '/tasks/${widget.taskId}/identify',
+    );
   }
 
   @override
@@ -75,7 +82,7 @@ class _S extends ConsumerState<CaptureScreen> {
               onPressed: _busy ? null : _start,
               child: _busy
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('开始批改 (${_photos.length})'),
+                  : Text('下一步 (${_photos.length})'),
             ),
         ],
       ),
