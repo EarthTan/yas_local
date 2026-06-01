@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import '../models/checkpoint.dart';
+import '../models/identified_question.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
@@ -19,6 +20,22 @@ class CheckpointGrade {
   final double confidence;
   final String? overallComment;
   const CheckpointGrade(this.checkpoints, this.confidence, this.overallComment);
+}
+
+class QuestionGradeResult {
+  final int questionNumber;
+  final String extractedAnswer;
+  final List<CheckpointResult> checkpoints;
+  final double confidence;
+  final String? overallComment;
+
+  const QuestionGradeResult({
+    required this.questionNumber,
+    required this.extractedAnswer,
+    required this.checkpoints,
+    required this.confidence,
+    this.overallComment,
+  });
 }
 
 class QwenService {
@@ -85,13 +102,14 @@ class QwenService {
         .toList();
   }
 
-  Future<ReferenceAnswer> generateReferenceWithAnswer(RubricItem r) async {
+  Future<ReferenceAnswer> generateReferenceWithAnswer(RubricItem r, {int totalQuestions = 0}) async {
+    final countCtx = totalQuestions > 0 ? '（作业共有 $totalQuestions 道题）' : '';
     final resp = await _dio.post('/chat/completions', data: {
       'model': settings.vlModel,
       'messages': [
         {
           'role': 'user',
-          'content': '你在帮老师准备评分标准。\n'
+          'content': '你在帮老师准备评分标准$countCtx。\n'
               '题目：${r.questionText}\n'
               '满分：${r.maxPoints}\n'
               '标准答案：${r.correctAnswer}\n'
@@ -107,7 +125,7 @@ class QwenService {
   }
 
   Future<ReferenceAnswer> generateReferenceFromImages(
-      RubricItem r, List<String> imagePaths) async {
+      RubricItem r, List<String> imagePaths, {int totalQuestions = 0}) async {
     final imageContent = <Map<String, dynamic>>[];
     for (final path in imagePaths) {
       final bytes = await File(path).readAsBytes();
@@ -118,6 +136,9 @@ class QwenService {
       });
     }
 
+    final countCtx = totalQuestions > 0 ? '作业共有 $totalQuestions 道题。' : '';
+    final textCtx = r.questionText.isNotEmpty ? '，题目内容：${r.questionText}' : '';
+
     final resp = await _dio.post('/chat/completions', data: {
       'model': settings.vlModel,
       'messages': [
@@ -127,8 +148,8 @@ class QwenService {
             ...imageContent,
             {
               'type': 'text',
-              'text': '这是同一张试卷的 ${imagePaths.length} 份不同学生作业图片。\n'
-                  '请仅根据印刷题目（第 ${r.questionNumber} 题，满分 ${r.maxPoints} 分）'
+              'text': '这是同一张试卷的 ${imagePaths.length} 份不同学生作业图片。$countCtx\n'
+                  '请仅根据印刷题目（第 ${r.questionNumber} 题，满分 ${r.maxPoints} 分$textCtx）'
                   '推断正确答案，忽略学生的手写作答。\n'
                   '综合多份图片找出共识答案，分解为评分 checkpoints。\n'
                   '只返回 JSON，不要解释：'
@@ -221,6 +242,117 @@ class QwenService {
       (json['confidence'] as num?)?.toDouble() ?? 0.8,
       json['overall_comment'] as String?,
     );
+  }
+
+  Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
+    final samples = imagePaths.length <= 3
+        ? imagePaths
+        : [imagePaths[0], imagePaths[imagePaths.length ~/ 2], imagePaths.last];
+
+    final imageContent = <Map<String, dynamic>>[];
+    for (final path in samples) {
+      final bytes = await File(path).readAsBytes();
+      final b64 = base64Encode(bytes);
+      imageContent.add({
+        'type': 'image_url',
+        'image_url': {'url': 'data:image/jpeg;base64,$b64'},
+      });
+    }
+
+    final resp = await _dio.post('/chat/completions', data: {
+      'model': settings.vlModel,
+      'messages': [
+        {
+          'role': 'user',
+          'content': [
+            ...imageContent,
+            {
+              'type': 'text',
+              'text': '请识别这份学生作业中的所有印刷题目（不含学生手写内容）。\n'
+                  '列出每道题的题号、题目内容、以及题型（客观题填 objective，主观题填 subjective）。\n'
+                  '只返回 JSON，不要解释：\n'
+                  '{"questions":[{"number":int,"text":string,"type":"objective|subjective"}]}',
+            },
+          ],
+        }
+      ],
+    });
+    final content = resp.data['choices'][0]['message']['content'] as String;
+    final parsed = _extractJson(content);
+    final qs = (parsed?['questions'] as List? ?? []);
+    return qs
+        .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<QuestionGradeResult>> gradePaper({
+    required String imagePath,
+    required List<RubricItem> rubric,
+    required List<ReferenceAnswer> refs,
+  }) async {
+    final bytes = await File(imagePath).readAsBytes();
+    final b64 = base64Encode(bytes);
+
+    final refByNum = {for (final r in refs) r.questionNumber: r};
+
+    final strategyLines = <String>[];
+    for (final item in rubric) {
+      final ref = refByNum[item.questionNumber];
+      if (ref == null || ref.checkpoints.isEmpty) continue;
+      final cpLines =
+          ref.checkpoints.map((c) => '  - ${c.description}（${c.points}分）').join('\n');
+      strategyLines.add('第${item.questionNumber}题（满分${item.maxPoints}分）：\n$cpLines');
+    }
+    final strategyText = strategyLines.join('\n\n');
+
+    final resp = await _dio.post('/chat/completions', data: {
+      'model': settings.vlModel,
+      'messages': [
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'image_url',
+              'image_url': {'url': 'data:image/jpeg;base64,$b64'},
+            },
+            {
+              'type': 'text',
+              'text': '请批改这份学生作业中的全部题目。评分标准如下：\n\n'
+                  '$strategyText\n\n'
+                  '对每道题，先提取学生的手写作答，然后按评分 checkpoints 逐条判断。\n'
+                  '只返回 JSON，不要解释：\n'
+                  '{"questions":[{"number":int,"extracted_answer":string,'
+                  '"checkpoints":[{"description":string,"passed":bool,'
+                  '"points_awarded":int,"reason":string}],'
+                  '"overall_comment":string,"confidence":0.0-1.0}]}',
+            },
+          ],
+        }
+      ],
+    });
+    final content = resp.data['choices'][0]['message']['content'] as String;
+    final parsed = _extractJson(content);
+    final qs = (parsed?['questions'] as List? ?? []);
+    return qs.map((q) {
+      final qNum = q['number'] is int
+          ? q['number'] as int
+          : int.tryParse(q['number'].toString()) ?? 0;
+      final cps = (q['checkpoints'] as List? ?? [])
+          .map((c) => CheckpointResult(
+                description: (c['description'] ?? '').toString(),
+                passed: c['passed'] as bool? ?? false,
+                pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
+                reason: (c['reason'] ?? '').toString(),
+              ))
+          .toList();
+      return QuestionGradeResult(
+        questionNumber: qNum,
+        extractedAnswer: (q['extracted_answer'] ?? '').toString(),
+        checkpoints: cps,
+        confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
+        overallComment: q['overall_comment'] as String?,
+      );
+    }).toList();
   }
 
   ReferenceAnswer _parseReferenceAnswer(int questionNumber, Map<String, dynamic> json) {
