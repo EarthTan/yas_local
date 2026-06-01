@@ -196,7 +196,7 @@ class _QuestionCard extends StatelessWidget {
               Row(children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: editable.type,
+                    initialValue: editable.type,
                     decoration: const InputDecoration(
                         labelText: '题型', border: OutlineInputBorder()),
                     items: const [
