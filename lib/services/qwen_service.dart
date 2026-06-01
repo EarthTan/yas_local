@@ -5,6 +5,7 @@ import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
+import '../models/strategy_message.dart';
 
 class OcrQuestion {
   final int number;
@@ -140,6 +141,42 @@ class QwenService {
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
     return _parseReferenceAnswer(r.questionNumber, _extractJson(content) ?? {});
+  }
+
+  Future<ReferenceAnswer> refineStrategy({
+    required RubricItem rubric,
+    required ReferenceAnswer current,
+    required List<StrategyMessage> chatHistory,
+    required String userMessage,
+  }) async {
+    final checkpointLines =
+        current.checkpoints.map((c) => '- ${c.description}（${c.points}分）').join('\n');
+    final systemPrompt = '你在帮老师修改题目的批改策略。\n'
+        '题目：${rubric.questionText.isEmpty ? "第 ${rubric.questionNumber} 题" : rubric.questionText}\n'
+        '满分：${rubric.maxPoints}\n'
+        '当前批改 checkpoints：\n$checkpointLines\n'
+        '老师会提出修改要求，请根据要求更新 checkpoints 并返回完整的新策略。\n'
+        '只返回 JSON，不要解释：'
+        '{"checkpoints":[{"description":string,"points":int}],'
+        '"equivalent_forms":[string],"has_consensus":bool}';
+
+    // Build multi-turn messages: system context first, then prior history, then new user message
+    final messages = <Map<String, dynamic>>[
+      {'role': 'user', 'content': systemPrompt},
+      {
+        'role': 'assistant',
+        'content': '好的，我已了解当前批改策略。请告诉我您希望如何修改。'
+      },
+      for (final m in chatHistory) {'role': m.role, 'content': m.content},
+      {'role': 'user', 'content': userMessage},
+    ];
+
+    final resp = await _dio.post('/chat/completions', data: {
+      'model': settings.vlModel,
+      'messages': messages,
+    });
+    final content = resp.data['choices'][0]['message']['content'] as String;
+    return _parseReferenceAnswer(current.questionNumber, _extractJson(content) ?? {});
   }
 
   Future<CheckpointGrade> gradeAgainstReference({

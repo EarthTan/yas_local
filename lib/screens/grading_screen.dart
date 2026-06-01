@@ -15,7 +15,7 @@ class _S extends ConsumerState<GradingScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(gradingProvider.notifier).run(widget.taskId);
+      ref.read(gradingProvider.notifier).runPhase2Only(widget.taskId);
     });
   }
 
@@ -33,10 +33,7 @@ class _S extends ConsumerState<GradingScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-            p.phase == GradingPhase.referenceGen ? '准备参考答案…' : '批改中…'),
-      ),
+      appBar: AppBar(title: const Text('批改中…')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -70,18 +67,6 @@ class _S extends ConsumerState<GradingScreen> {
                   child: const Text('查看结果'),
                 ),
               ]),
-            ] else if (p.phase == GradingPhase.referenceGen) ...[
-              Text(
-                '生成参考答案 ${p.refDone} / ${p.refTotal} 题',
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              LinearProgressIndicator(
-                  value: p.refTotal > 0 ? p.refDone / p.refTotal : null),
-              const SizedBox(height: 16),
-              const Text('正在分析题目标准，请稍候…',
-                  style: TextStyle(color: Colors.grey)),
             ] else ...[
               Text(
                 '批改中 ${p.done} / ${p.total} 份',

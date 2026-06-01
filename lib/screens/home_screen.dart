@@ -45,7 +45,7 @@ class HomeScreen extends ConsumerWidget {
                               title: Text(t.name),
                               subtitle: Text('${t.subject} · ${ref.read(taskProvider.notifier).submissionsFor(t.id).length} 份'),
                               trailing: const Icon(Icons.chevron_right),
-                              onTap: () => context.push('/tasks/${t.id}/results'),
+                              onTap: () => context.push('/tasks/${t.id}'),
                             ),
                         ],
                       ),

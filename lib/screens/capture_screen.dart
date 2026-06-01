@@ -61,7 +61,7 @@ class _S extends ConsumerState<CaptureScreen> {
       subs.add(Submission(id: id, taskId: widget.taskId, label: '第 ${i + 1} 份', imagePath: path));
     }
     await ref.read(taskProvider.notifier).setSubmissions(widget.taskId, subs);
-    if (mounted) context.pushReplacement('/tasks/${widget.taskId}/grading');
+    if (mounted) context.pushReplacement('/tasks/${widget.taskId}/strategy');
   }
 
   @override

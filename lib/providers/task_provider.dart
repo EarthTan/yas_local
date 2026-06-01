@@ -59,6 +59,19 @@ class TaskNotifier extends StateNotifier<TaskState> {
     );
     await _persist();
   }
+
+  Future<void> resetGradingResults(String taskId) async {
+    state = state.copyWith(
+      submissions: [
+        for (final s in state.submissions)
+          if (s.taskId == taskId)
+            s.copyWith(status: SubmissionStatus.pending, items: [])
+          else
+            s,
+      ],
+    );
+    await _persist();
+  }
 }
 
 final taskProvider =

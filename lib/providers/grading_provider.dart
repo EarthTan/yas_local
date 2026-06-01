@@ -56,6 +56,93 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
   GradingNotifier(this.ref) : super(const GradingProgress());
   final Ref ref;
 
+  /// Run Phase 2 only — assumes references are already saved by StrategyNotifier.
+  Future<void> runPhase2Only(String taskId) async {
+    final settings = ref.read(settingsProvider);
+    if (!settings.isConfigured) {
+      state = state.copyWith(error: '未配置 API Key，请先到设置填写');
+      return;
+    }
+    final notifier = ref.read(taskProvider.notifier);
+    final task = notifier.taskById(taskId);
+    if (task == null) return;
+    final subs = notifier.submissionsFor(taskId);
+    final qwen = QwenService(settings);
+
+    final references = await ReferenceStore.load(taskId);
+    final referenceByNum = {for (final r in references) r.questionNumber: r};
+
+    state = GradingProgress(
+      phase: GradingPhase.grading,
+      total: subs.length,
+      done: 0,
+      running: true,
+    );
+
+    String? firstApiError;
+
+    for (final sub in subs) {
+      try {
+        await notifier.updateSubmission(
+            sub.copyWith(status: SubmissionStatus.processing));
+        final ocr = await qwen.ocrPaper(sub.imagePath!);
+        final ocrByNum = {for (final q in ocr) q.number: q.studentAnswer};
+
+        final items = <GradedItem>[];
+        for (final rubricItem in task.rubric) {
+          final studentAnswer = ocrByNum[rubricItem.questionNumber] ?? '';
+          final refAnswer = referenceByNum[rubricItem.questionNumber];
+
+          if (studentAnswer.isEmpty) {
+            items.add(_zeroItem(rubricItem, refAnswer));
+            continue;
+          }
+
+          if (refAnswer == null || refAnswer.checkpoints.isEmpty) {
+            items.add(GradedItem(
+              questionNumber: rubricItem.questionNumber,
+              type: rubricItem.type,
+              extractedAnswer: studentAnswer,
+              aiScore: 0,
+              confidence: 0.5,
+            ));
+            continue;
+          }
+
+          final grade = await qwen.gradeAgainstReference(
+            rubric: rubricItem,
+            ref: refAnswer,
+            studentAnswer: studentAnswer,
+          );
+          items.add(GradedItem(
+            questionNumber: rubricItem.questionNumber,
+            type: rubricItem.type,
+            extractedAnswer: studentAnswer,
+            checkpoints: grade.checkpoints,
+            aiScore: grade.checkpoints
+                .fold<int>(0, (sum, c) => sum + c.pointsAwarded),
+            aiComment: grade.overallComment,
+            confidence: grade.confidence,
+          ));
+        }
+
+        await notifier.updateSubmission(
+            sub.copyWith(status: SubmissionStatus.done, items: items));
+      } catch (e) {
+        await notifier.updateSubmission(
+            sub.copyWith(status: SubmissionStatus.failed));
+        firstApiError ??= _formatError(e);
+      }
+      state = state.copyWith(done: state.done + 1);
+    }
+
+    if (firstApiError != null) {
+      state = state.copyWith(running: false, error: firstApiError);
+    } else {
+      state = state.copyWith(running: false);
+    }
+  }
+
   Future<void> run(String taskId) async {
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) {
