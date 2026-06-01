@@ -3,6 +3,9 @@ import 'package:yas_local/models/task.dart';
 import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/submission.dart';
 import 'package:yas_local/services/task_store.dart';
+import 'package:yas_local/models/checkpoint.dart';
+import 'package:yas_local/models/reference_answer.dart';
+import 'package:yas_local/services/reference_store.dart';
 
 void main() {
   test('encode/decode 整库往返', () {
@@ -29,5 +32,18 @@ void main() {
     final decoded = TaskStore.decode('');
     expect(decoded.tasks, isEmpty);
     expect(decoded.submissions, isEmpty);
+  });
+
+  test('ReferenceStore encode/decode 往返', () {
+    final refs = [
+      ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: const [CheckpointDef(description: '答对', points: 5)],
+      ),
+    ];
+    final decoded = ReferenceStore.decode(ReferenceStore.encode(refs));
+    expect(decoded.length, 1);
+    expect(decoded.first.questionNumber, 1);
+    expect(decoded.first.checkpoints.first.points, 5);
   });
 }

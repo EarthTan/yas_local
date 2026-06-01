@@ -3,6 +3,7 @@ import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/task.dart';
 import 'package:yas_local/models/submission.dart';
 import 'package:yas_local/models/checkpoint.dart';
+import 'package:yas_local/models/reference_answer.dart';
 
 void main() {
   test('RubricItem JSON 往返', () {
@@ -64,5 +65,29 @@ void main() {
     expect(back.passed, true);
     expect(back.pointsAwarded, 2);
     expect(back.reason, '学生写出了 x+2=5');
+  });
+
+  test('ReferenceAnswer JSON 往返', () {
+    final ref = ReferenceAnswer(
+      questionNumber: 2,
+      checkpoints: const [CheckpointDef(description: '求解 x', points: 3)],
+      equivalentForms: const ['x=3', '3'],
+      hasConsensus: true,
+    );
+    final back = ReferenceAnswer.fromJson(ref.toJson());
+    expect(back.questionNumber, 2);
+    expect(back.checkpoints.length, 1);
+    expect(back.checkpoints.first.points, 3);
+    expect(back.equivalentForms, ['x=3', '3']);
+    expect(back.hasConsensus, true);
+  });
+
+  test('ReferenceAnswer hasConsensus=false 序列化', () {
+    const ref = ReferenceAnswer(
+      questionNumber: 3,
+      checkpoints: [],
+      hasConsensus: false,
+    );
+    expect(ReferenceAnswer.fromJson(ref.toJson()).hasConsensus, false);
   });
 }
