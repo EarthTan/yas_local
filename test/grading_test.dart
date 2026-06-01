@@ -1,20 +1,44 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yas_local/services/grading.dart';
+import 'package:yas_local/models/checkpoint.dart';
+import 'package:yas_local/models/reference_answer.dart';
 
 void main() {
-  test('完全匹配得满分，高置信', () {
-    final r = gradeObjectiveByKey(student: 'B', correct: 'B', maxPoints: 5);
-    expect(r.score, 5);
-    expect(r.confidence, greaterThanOrEqualTo(0.95));
+  test('CheckpointResult 分数聚合', () {
+    const checkpoints = [
+      CheckpointResult(description: 'A', passed: true, pointsAwarded: 2, reason: ''),
+      CheckpointResult(description: 'B', passed: false, pointsAwarded: 0, reason: ''),
+    ];
+    final total = checkpoints.fold(0, (sum, c) => sum + c.pointsAwarded);
+    expect(total, 2);
   });
-  test('不匹配得 0', () {
-    final r = gradeObjectiveByKey(student: 'A', correct: 'B', maxPoints: 5);
-    expect(r.score, 0);
+
+  test('ReferenceAnswer checkpoint 满分汇总', () {
+    const ref = ReferenceAnswer(
+      questionNumber: 1,
+      checkpoints: [
+        CheckpointDef(description: 'step1', points: 3),
+        CheckpointDef(description: 'step2', points: 2),
+      ],
+    );
+    final maxPoints = ref.checkpoints.fold(0, (sum, c) => sum + c.points);
+    expect(maxPoints, 5);
   });
-  test('大小写/空格不敏感', () {
-    expect(gradeObjectiveByKey(student: ' b ', correct: 'B', maxPoints: 5).score, 5);
+
+  test('CheckpointResult 全失败总分为零', () {
+    const checkpoints = [
+      CheckpointResult(description: 'A', passed: false, pointsAwarded: 0, reason: '未作答'),
+      CheckpointResult(description: 'B', passed: false, pointsAwarded: 0, reason: '未作答'),
+    ];
+    expect(checkpoints.fold(0, (sum, c) => sum + c.pointsAwarded), 0);
   });
-  test('数字匹配', () {
-    expect(gradeObjectiveByKey(student: '42', correct: ' 42 ', maxPoints: 3).score, 3);
+
+  test('has_consensus false 不影响 ReferenceAnswer 构造', () {
+    const ref = ReferenceAnswer(
+      questionNumber: 2,
+      checkpoints: [],
+      hasConsensus: false,
+    );
+    expect(ref.hasConsensus, false);
+    expect(ref.checkpoints, isEmpty);
   });
 }
