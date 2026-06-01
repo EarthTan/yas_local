@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/task.dart';
 import 'package:yas_local/models/submission.dart';
+import 'package:yas_local/models/checkpoint.dart';
 
 void main() {
   test('RubricItem JSON 往返', () {
@@ -43,5 +44,25 @@ void main() {
     expect(const GradedItem(questionNumber: 1, type: 'objective', confidence: 0.9).trafficLight, 'green');
     expect(const GradedItem(questionNumber: 1, type: 'objective', confidence: 0.7).trafficLight, 'yellow');
     expect(const GradedItem(questionNumber: 1, type: 'objective', confidence: 0.3).trafficLight, 'red');
+  });
+
+  test('CheckpointDef JSON 往返', () {
+    const def = CheckpointDef(description: '正确建立方程', points: 2);
+    final back = CheckpointDef.fromJson(def.toJson());
+    expect(back.description, '正确建立方程');
+    expect(back.points, 2);
+  });
+
+  test('CheckpointResult JSON 往返', () {
+    const result = CheckpointResult(
+      description: '建立方程',
+      passed: true,
+      pointsAwarded: 2,
+      reason: '学生写出了 x+2=5',
+    );
+    final back = CheckpointResult.fromJson(result.toJson());
+    expect(back.passed, true);
+    expect(back.pointsAwarded, 2);
+    expect(back.reason, '学生写出了 x+2=5');
   });
 }
