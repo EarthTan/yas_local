@@ -23,12 +23,20 @@ class _S extends ConsumerState<GradingScreen> {
   Widget build(BuildContext context) {
     final p = ref.watch(gradingProvider);
     ref.listen(gradingProvider, (prev, next) {
-      if (!next.running && next.error == null && next.total > 0 && next.done == next.total) {
+      if (!next.running &&
+          next.error == null &&
+          next.phase == GradingPhase.grading &&
+          next.total > 0 &&
+          next.done == next.total) {
         context.pushReplacement('/tasks/${widget.taskId}/results');
       }
     });
+
     return Scaffold(
-      appBar: AppBar(title: const Text('批改中...')),
+      appBar: AppBar(
+        title: Text(
+            p.phase == GradingPhase.referenceGen ? '准备参考答案…' : '批改中…'),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -46,24 +54,46 @@ class _S extends ConsumerState<GradingScreen> {
                 child: SelectableText(
                   p.error!,
                   textAlign: TextAlign.left,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                  style:
+                      const TextStyle(fontFamily: 'monospace', fontSize: 13),
                 ),
               ),
               const SizedBox(height: 16),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                FilledButton(onPressed: () => context.go('/settings'), child: const Text('去设置')),
+                FilledButton(
+                    onPressed: () => context.go('/settings'),
+                    child: const Text('去设置')),
                 const SizedBox(width: 12),
                 OutlinedButton(
-                  onPressed: () => context.pushReplacement('/tasks/${widget.taskId}/results'),
+                  onPressed: () => context.pushReplacement(
+                      '/tasks/${widget.taskId}/results'),
                   child: const Text('查看结果'),
                 ),
               ]),
+            ] else if (p.phase == GradingPhase.referenceGen) ...[
+              Text(
+                '生成参考答案 ${p.refDone} / ${p.refTotal} 题',
+                style: const TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                  value: p.refTotal > 0 ? p.refDone / p.refTotal : null),
+              const SizedBox(height: 16),
+              const Text('正在分析题目标准，请稍候…',
+                  style: TextStyle(color: Colors.grey)),
             ] else ...[
-              Text('${p.done} / ${p.total} 份已批改', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(
+                '批改中 ${p.done} / ${p.total} 份',
+                style: const TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 16),
-              LinearProgressIndicator(value: p.total > 0 ? p.done / p.total : null),
+              LinearProgressIndicator(
+                  value: p.total > 0 ? p.done / p.total : null),
               const SizedBox(height: 16),
-              const Text('正在识别与评分，请稍候…', style: TextStyle(color: Colors.grey)),
+              const Text('正在识别与评分，请稍候…',
+                  style: TextStyle(color: Colors.grey)),
             ],
           ]),
         ),
