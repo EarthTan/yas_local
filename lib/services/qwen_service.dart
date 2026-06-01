@@ -8,20 +8,6 @@ import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
 
-class OcrQuestion {
-  final int number;
-  final String studentAnswer;
-  final String type;
-  OcrQuestion(this.number, this.studentAnswer, this.type);
-}
-
-class CheckpointGrade {
-  final List<CheckpointResult> checkpoints;
-  final double confidence;
-  final String? overallComment;
-  const CheckpointGrade(this.checkpoints, this.confidence, this.overallComment);
-}
-
 class QuestionGradeResult {
   final int questionNumber;
   final String extractedAnswer;
@@ -62,44 +48,6 @@ class QwenService {
       }
     }
     return url;
-  }
-
-  Future<List<OcrQuestion>> ocrPaper(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    final b64 = base64Encode(bytes);
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            {
-              'type': 'image_url',
-              'image_url': {'url': 'data:image/jpeg;base64,$b64'}
-            },
-            {
-              'type': 'text',
-              'text': '识别这张学生作业。抽取每道题的题号和学生作答。'
-                  '只返回 JSON，不要解释：'
-                  '{"questions":[{"number":int,"student_answer":string,"type":"objective|subjective"}]}'
-            },
-          ],
-        }
-      ],
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    final parsed = _extractJson(content);
-    final qs = (parsed?['questions'] as List? ?? []);
-    return qs
-        .map((q) => OcrQuestion(
-              // Models may return number as int or string — handle both
-              q['number'] is int
-                  ? q['number'] as int
-                  : int.tryParse(q['number'].toString()) ?? 0,
-              (q['student_answer'] ?? '').toString(),
-              (q['type'] ?? 'objective').toString(),
-            ))
-        .toList();
   }
 
   Future<ReferenceAnswer> generateReferenceWithAnswer(RubricItem r, {int totalQuestions = 0}) async {
@@ -198,50 +146,6 @@ class QwenService {
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
     return _parseReferenceAnswer(current.questionNumber, _extractJson(content) ?? {});
-  }
-
-  Future<CheckpointGrade> gradeAgainstReference({
-    required RubricItem rubric,
-    required ReferenceAnswer ref,
-    required String studentAnswer,
-  }) async {
-    final checkpointLines =
-        ref.checkpoints.map((c) => '- ${c.description}（${c.points}分）').join('\n');
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': '你在批改学生作答。\n'
-              '题目：${rubric.questionText}\n'
-              '满分：${rubric.maxPoints}\n'
-              '评分 checkpoints：\n$checkpointLines\n'
-              '学生作答：$studentAnswer\n'
-              '按每个 checkpoint 判断是否通过并给分。只返回 JSON，不要解释：'
-              '{"checkpoints":[{"description":string,"passed":bool,'
-              '"points_awarded":int,"reason":string}],'
-              '"overall_comment":string,"confidence":0.0-1.0}',
-        }
-      ],
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    final json = _extractJson(content) ?? {};
-
-    final rawList = json['checkpoints'] as List? ?? [];
-    final results = rawList
-        .map((c) => CheckpointResult(
-              description: (c['description'] ?? '').toString(),
-              passed: c['passed'] as bool? ?? false,
-              pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-              reason: (c['reason'] ?? '').toString(),
-            ))
-        .toList();
-
-    return CheckpointGrade(
-      results,
-      (json['confidence'] as num?)?.toDouble() ?? 0.8,
-      json['overall_comment'] as String?,
-    );
   }
 
   Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
