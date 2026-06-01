@@ -186,47 +186,6 @@ class QwenService {
     );
   }
 
-  Future<Map<String, dynamic>> gradeSubjective({
-    required String question,
-    required String criteria,
-    required int maxPoints,
-    required String studentAnswer,
-  }) async {
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.textModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': '你在协助老师批改主观题。\n'
-              '题目：$question\n评分标准：${criteria.isEmpty ? "（未提供，按完整度宽松评分）" : criteria}\n'
-              '满分：$maxPoints\n学生作答：$studentAnswer\n'
-              '只返回 JSON：{"score":int(0-$maxPoints),"comment":"一两句中文评语","confidence":0.0-1.0}'
-        }
-      ],
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    return _extractJson(content) ?? {'score': 0, 'comment': '', 'confidence': 0.0};
-  }
-
-  Future<Map<String, dynamic>> judgeObjective({
-    required String question,
-    required String studentAnswer,
-    required int maxPoints,
-  }) async {
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.textModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': '判断学生这道客观题是否正确。\n题目：$question\n学生作答：$studentAnswer\n'
-              '只返回 JSON：{"correct":true/false,"confidence":0.0-1.0}'
-        }
-      ],
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    return _extractJson(content) ?? {'correct': false, 'confidence': 0.0};
-  }
-
   ReferenceAnswer _parseReferenceAnswer(int questionNumber, Map<String, dynamic> json) {
     final checkpoints = (json['checkpoints'] as List? ?? [])
         .map((c) => CheckpointDef(
