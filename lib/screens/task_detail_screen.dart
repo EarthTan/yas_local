@@ -55,6 +55,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
     final refs = _cachedRefs ?? <ReferenceAnswer>[];
     final hasRefs = refs.isNotEmpty;
     final allConfirmed = hasRefs && refs.every((r) => r.confirmed);
+    final hasRubric = task.rubric.isNotEmpty;
 
     // Show re-grade button if there are grading results and references exist
     final showRegrade = hasGradingResults && hasRefs;
@@ -74,8 +75,9 @@ class _S extends ConsumerState<TaskDetailScreen> {
                   Text(task.subject,
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Text('共 ${task.rubric.length} 道题 · 满分 $totalPoints 分',
-                      style: TextStyle(color: Colors.grey[600])),
+                  if (hasRubric)
+                    Text('共 ${task.rubric.length} 道题 · 满分 $totalPoints 分',
+                        style: TextStyle(color: Colors.grey[600])),
                   Text('已上传 ${subs.length} 份 · 已批改 $gradedCount 份',
                       style: TextStyle(color: Colors.grey[600])),
                 ],
@@ -92,13 +94,19 @@ class _S extends ConsumerState<TaskDetailScreen> {
           else if (subs.isEmpty)
             _infoTile(
               Icons.info_outline,
-              '请先上传作业图片，系统会自动生成批改策略',
+              '请先上传作业图片',
               Colors.grey,
+            )
+          else if (!hasRubric)
+            _infoTile(
+              Icons.find_in_page,
+              '作业已上传，题目待 AI 识别',
+              Colors.orange,
             )
           else if (!hasRefs)
             _infoTile(
               Icons.auto_awesome,
-              '尚未生成批改策略',
+              '题目已确认，尚未生成批改策略',
               Colors.orange,
             )
           else if (allConfirmed)
@@ -114,16 +122,24 @@ class _S extends ConsumerState<TaskDetailScreen> {
               Colors.orange,
             ),
           const SizedBox(height: 8),
-          if (!_loadingRefs && subs.isNotEmpty)
-            OutlinedButton.icon(
-              onPressed: () => context.push('/tasks/${widget.taskId}/strategy'),
-              icon: Icon(hasRefs ? Icons.edit_note : Icons.auto_awesome),
-              label: Text(
-                hasRefs
-                    ? (allConfirmed ? '查看 / 修改批改策略' : '继续完善批改策略')
-                    : '生成批改策略',
+          if (!_loadingRefs && subs.isNotEmpty) ...[
+            if (!hasRubric)
+              OutlinedButton.icon(
+                onPressed: () => context.push('/tasks/${widget.taskId}/identify'),
+                icon: const Icon(Icons.find_in_page),
+                label: const Text('识别题目'),
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: () => context.push('/tasks/${widget.taskId}/strategy'),
+                icon: Icon(hasRefs ? Icons.edit_note : Icons.auto_awesome),
+                label: Text(
+                  hasRefs
+                      ? (allConfirmed ? '查看 / 修改批改策略' : '继续完善批改策略')
+                      : '生成批改策略',
+                ),
               ),
-            ),
+          ],
           const SizedBox(height: 24),
 
           // Results section

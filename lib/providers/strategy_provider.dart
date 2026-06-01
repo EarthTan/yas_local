@@ -103,7 +103,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       try {
         ReferenceAnswer ref;
         if (item.correctAnswer != null) {
-          ref = await qwen.generateReferenceWithAnswer(item);
+          ref = await qwen.generateReferenceWithAnswer(item, totalQuestions: rubric.length);
         } else {
           final images = _pickSampleImages(subs);
           if (images.isEmpty) {
@@ -113,7 +113,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
               hasConsensus: false,
             );
           } else {
-            ref = await qwen.generateReferenceFromImages(item, images);
+            ref = await qwen.generateReferenceFromImages(item, images, totalQuestions: rubric.length);
           }
         }
         references.add(ref);
