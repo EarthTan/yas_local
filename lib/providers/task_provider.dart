@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/task.dart';
 import '../models/submission.dart';
+import '../models/rubric.dart';
 import '../services/task_store.dart';
 
 class TaskState {
@@ -68,6 +69,25 @@ class TaskNotifier extends StateNotifier<TaskState> {
             s.copyWith(status: SubmissionStatus.pending, items: [])
           else
             s,
+      ],
+    );
+    await _persist();
+  }
+
+  Future<void> updateTaskRubric(String taskId, List<RubricItem> rubric) async {
+    state = state.copyWith(
+      tasks: [
+        for (final t in state.tasks)
+          if (t.id == taskId)
+            GradingTask(
+              id: t.id,
+              name: t.name,
+              subject: t.subject,
+              createdAt: t.createdAt,
+              rubric: rubric,
+            )
+          else
+            t,
       ],
     );
     await _persist();
