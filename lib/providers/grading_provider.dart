@@ -64,6 +64,11 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
     String? firstApiError;
 
     for (final sub in subs) {
+      if (sub.imagePath == null) {
+        await notifier.updateSubmission(sub.copyWith(status: SubmissionStatus.failed));
+        state = state.copyWith(done: state.done + 1);
+        continue;
+      }
       try {
         await notifier.updateSubmission(
             sub.copyWith(status: SubmissionStatus.processing));

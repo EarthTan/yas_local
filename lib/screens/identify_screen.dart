@@ -133,8 +133,10 @@ class _S extends ConsumerState<IdentifyScreen> {
                     textAlign: TextAlign.center),
                 const SizedBox(height: 16),
                 FilledButton(
-                  onPressed: () =>
-                      ref.read(identificationProvider.notifier).identify(widget.taskId),
+                  onPressed: () {
+                    setState(() => _initialized = false);
+                    ref.read(identificationProvider.notifier).identify(widget.taskId);
+                  },
                   child: const Text('重试'),
                 ),
               ],
