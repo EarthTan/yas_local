@@ -39,12 +39,42 @@ class PaperDetailScreen extends ConsumerWidget {
                   ]),
                   const SizedBox(height: 4),
                   Text('学生作答：${item.extractedAnswer ?? "（未识别）"}'),
+                  if (item.checkpoints.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Divider(height: 1),
+                    const SizedBox(height: 6),
+                    for (final cp in item.checkpoints)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Icon(
+                            cp.passed ? Icons.check_circle : Icons.cancel,
+                            color: cp.passed ? Colors.green : Colors.red,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('${cp.description}（${cp.pointsAwarded}分）',
+                                  style: const TextStyle(fontSize: 13)),
+                              if (cp.reason.isNotEmpty)
+                                Text(cp.reason,
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            ]),
+                          ),
+                        ]),
+                      ),
+                    const SizedBox(height: 4),
+                  ],
                   if (item.aiComment != null && item.aiComment!.isNotEmpty)
-                    Padding(padding: const EdgeInsets.only(top: 4), child: Text('AI 评语：${item.aiComment}')),
+                    Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('AI 评语：${item.aiComment}')),
                   Row(children: [
                     Text('AI 分：${item.aiScore ?? "-"}'),
                     const Spacer(),
-                    Text('终分：${item.finalScore}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('终分：${item.finalScore}',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                   ]),
                   Row(children: [
                     const Text('改分：'),
@@ -60,7 +90,8 @@ class PaperDetailScreen extends ConsumerWidget {
                             for (final it in sub.items)
                               if (it.questionNumber == item.questionNumber)
                                 it.copyWith(teacherScore: v.round())
-                              else it,
+                              else
+                                it,
                           ];
                           notifier.updateSubmission(sub.copyWith(items: updated));
                         },
