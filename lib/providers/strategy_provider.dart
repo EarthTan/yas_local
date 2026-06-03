@@ -181,16 +181,17 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
     state = state.copyWith(refining: true, refiningQuestion: questionNum);
 
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId / q:$questionNum',
+      message: 'refine 开始',
+    );
+
     final updatedHistory = [
       ...current.chatHistory,
       StrategyMessage(role: 'user', content: message),
     ];
 
     try {
-      DebugService.instance.recordEvent(
-        scope: 'task:$taskId / q:$questionNum',
-        message: 'refine 开始',
-      );
       final qwen = QwenService(settings);
       final updated = await qwen.refineStrategy(
         rubric: rubricItem,
