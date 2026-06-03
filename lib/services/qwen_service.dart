@@ -7,9 +7,9 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
+import 'debug_service.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';
-import 'qwen_logger.dart';
 
 class QuestionGradeResult {
   final int questionNumber;
@@ -30,6 +30,7 @@ class QuestionGradeResult {
 class QwenService {
   final AppSettings settings;
   final Dio _dio;
+  Dio get dio => _dio;
 
   QwenService(this.settings)
       : _dio = Dio(BaseOptions(
@@ -55,15 +56,18 @@ class QwenService {
           final content = choice['content'] as String? ?? '';
           final reasoning = choice['reasoning_content'] as String?;
           final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
-          QwenLogger.logSuccess(
+          DebugService.instance.recordQwenCall(QwenCallRecord(
+            timestamp: start ?? DateTime.now(),
+            scope: response.requestOptions.extra['_qwen_scope'] as String? ?? 'unknown',
             model: settings.vlModel,
             endpoint: response.requestOptions.path,
+            statusCode: response.statusCode,
+            elapsedMs: elapsed,
+            status: QwenCallStatus.ok,
             messages: messages,
             responseContent: content,
             reasoningContent: reasoning,
-            statusCode: response.statusCode,
-            elapsedMs: elapsed,
-          );
+          ));
         }
         handler.next(response);
       },
@@ -71,17 +75,17 @@ class QwenService {
         final messages = e.requestOptions.extra['_qwen_messages'] as List<Map<String, dynamic>>?;
         final start = e.requestOptions.extra['_qwen_start'] as DateTime?;
         final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
-        final summary = messages == null ? null : _summarizeRequest(messages);
-        final body = e.response?.data?.toString();
-        QwenLogger.logError(
+        DebugService.instance.recordQwenCall(QwenCallRecord(
+          timestamp: start ?? DateTime.now(),
+          scope: e.requestOptions.extra['_qwen_scope'] as String? ?? 'unknown',
+          model: settings.vlModel,
           endpoint: e.requestOptions.path,
           statusCode: e.response?.statusCode,
-          errorType: e.type.name,
-          message: e.message ?? '',
-          requestSummary: summary,
-          responseSnippet: body == null ? null : (body.length > 500 ? '${body.substring(0, 500)}…' : body),
           elapsedMs: elapsed,
-        );
+          status: QwenCallStatus.httpError,
+          messages: messages ?? const [],
+          errorMessage: e.message ?? '',
+        ));
         handler.next(e);
       },
     ));
@@ -131,27 +135,31 @@ class QwenService {
 
     final countCtx = totalQuestions > 0 ? '（作业共有 $totalQuestions 道题）' : '';
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.generateStrategy(
-                questionNumber: rubricItem.questionNumber,
-                maxPoints: rubricItem.maxPoints,
-                questionText: rubricItem.questionText,
-                hasAnswerImages: answerImagePaths.isNotEmpty,
-                countCtx: countCtx,
-              ),
-            },
-          ],
-        }
-      ],
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.generateStrategy(
+                  questionNumber: rubricItem.questionNumber,
+                  maxPoints: rubricItem.maxPoints,
+                  questionText: rubricItem.questionText,
+                  hasAnswerImages: answerImagePaths.isNotEmpty,
+                  countCtx: countCtx,
+                ),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'strategy'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
     final payload = JsonExtractor.requireObjectWithReasoning(content);
     return _parseReferenceAnswer(
@@ -191,10 +199,14 @@ class QwenService {
       {'role': 'user', 'content': userMessage},
     ];
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': messages,
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': messages,
+      },
+      options: Options(extra: {'_qwen_scope': 'refine'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
     final payload = JsonExtractor.requireObjectWithReasoning(content);
     return _parseReferenceAnswer(
@@ -219,21 +231,25 @@ class QwenService {
       });
     }
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.identifyQuestions(),
-            },
-          ],
-        }
-      ],
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.identifyQuestions(),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'identify'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
     final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
     // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
@@ -277,21 +293,25 @@ class QwenService {
       'image_url': {'url': 'data:${_mimeType(imagePath)};base64,$studentB64'},
     });
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.gradePaper(strategyText: strategyText),
-            },
-          ],
-        }
-      ],
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.gradePaper(strategyText: strategyText),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'grade'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
     final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
     // reasoning 丢弃：批改的思考过程不暴露给学生/老师
