@@ -199,9 +199,81 @@ class _EventsTab extends ConsumerWidget {
 
 class _StateTab extends ConsumerWidget {
   const _StateTab();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return const Center(child: Text('存储状态 tab placeholder'));
+    final snap = ref.watch(debugProvider).stateSnapshot;
+    if (snap == null) {
+      return const Center(
+        child: Text('暂无状态快照', style: TextStyle(color: Colors.black)),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(8),
+      children: [
+        _settingsTile(snap),
+        const Divider(color: Colors.black26),
+        ..._taskTiles(snap),
+      ],
+    );
+  }
+
+  Widget _settingsTile(StateSnapshot snap) {
+    final s = snap.settings;
+    final apiKey = s.apiKey as String;
+    return ExpansionTile(
+      title: const Text('📁 Settings', style: TextStyle(color: Colors.black)),
+      subtitle: Text('apiKey: ${apiKey.substring(0, apiKey.length < 4 ? apiKey.length : 4)}... · baseUrl: ${s.baseUrl}',
+          style: const TextStyle(color: Colors.black, fontSize: 12)),
+      children: [
+        ListTile(
+          title: const Text('vlModel', style: TextStyle(color: Colors.black)),
+          subtitle: Text(s.vlModel, style: const TextStyle(color: Colors.black)),
+        ),
+        ListTile(
+          title: const Text('textModel', style: TextStyle(color: Colors.black)),
+          subtitle: Text(s.textModel, style: const TextStyle(color: Colors.black)),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _taskTiles(StateSnapshot snap) {
+    final tasks = snap.tasks;
+    if (tasks.isEmpty) {
+      return [
+        const ListTile(
+          title: Text('📁 Tasks (0)', style: TextStyle(color: Colors.black)),
+        ),
+      ];
+    }
+    return [
+      ListTile(
+        title: Text('📁 Tasks (${tasks.length})', style: const TextStyle(color: Colors.black)),
+      ),
+      for (final t in tasks) _taskTile(t),
+    ];
+  }
+
+  Widget _taskTile(dynamic t) {
+    // Access by name. Models are typed but we use dynamic to avoid imports.
+    final name = t.name as String;
+    final subs = (t.submissions as List?) ?? const [];
+    final rubric = (t.rubric as List?) ?? const [];
+    final questionPaperPaths = (t.questionPaperPaths as List?) ?? const [];
+    final answerImagePaths = (t.answerImagePaths as List?) ?? const [];
+    return Padding(
+      padding: const EdgeInsets.only(left: 16),
+      child: ExpansionTile(
+        title: Text('📂 $name · ${subs.length} 份', style: const TextStyle(color: Colors.black)),
+        children: [
+          ListTile(title: Text('Rubric (${rubric.length} 题)', style: const TextStyle(color: Colors.black))),
+          ListTile(title: Text('QuestionPaper (${questionPaperPaths.length} 张)', style: const TextStyle(color: Colors.black))),
+          ListTile(title: Text('AnswerKey (${answerImagePaths.length} 张)', style: const TextStyle(color: Colors.black))),
+          ListTile(title: Text('Submissions: ${subs.length}', style: const TextStyle(color: Colors.black))),
+        ],
+      ),
+    );
   }
 }
 
