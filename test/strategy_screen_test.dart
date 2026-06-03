@@ -142,4 +142,100 @@ void main() {
     );
     expect(find.text('已确认'), findsOneWidget);
   });
+
+  testWidgets('BottomActionBar 三个按钮分别触发各自的 callback', (tester) async {
+    var refineCount = 0;
+    var confirmCount = 0;
+    var nextCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BottomActionBar(
+            confirmed: false,
+            isLast: false,
+            isRefining: false,
+            onRefine: () => refineCount++,
+            onConfirm: () => confirmCount++,
+            onNext: () => nextCount++,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '修改策略'));
+    await tester.pump();
+    expect(refineCount, 1);
+    expect(confirmCount, 0);
+    expect(nextCount, 0);
+
+    await tester.tap(find.widgetWithText(FilledButton, '确认此题'));
+    await tester.pump();
+    expect(refineCount, 1);
+    expect(confirmCount, 1);
+    expect(nextCount, 0);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '下一题 →'));
+    await tester.pump();
+    expect(refineCount, 1);
+    expect(confirmCount, 1);
+    expect(nextCount, 1);
+  });
+
+  testWidgets('BottomActionBar disabled 状态：isLast 禁用 next、isRefining 禁用 refine + confirm', (tester) async {
+    // Scenario A: isLast: true → next 按钮 disabled，其余 enabled
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BottomActionBar(
+            confirmed: false,
+            isLast: true,
+            isRefining: false,
+            onRefine: () {},
+            onConfirm: () {},
+            onNext: () {},
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '已是最后一题')).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略')).onPressed,
+      isNotNull,
+    );
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题')).onPressed,
+      isNotNull,
+    );
+
+    // Scenario B: isRefining: true → refine + confirm disabled，next enabled
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BottomActionBar(
+            confirmed: false,
+            isLast: false,
+            isRefining: true,
+            onRefine: () {},
+            onConfirm: () {},
+            onNext: () {},
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略')).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题')).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '下一题 →')).onPressed,
+      isNotNull,
+    );
+  });
 }
