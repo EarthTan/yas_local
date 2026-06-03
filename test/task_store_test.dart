@@ -8,11 +8,13 @@ import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/services/reference_store.dart';
 
 void main() {
-  test('encode/decode 整库往返', () {
+  test('encode/decode 整库往返（含图片路径）', () {
     final tasks = [
       GradingTask(
         id: 't1', name: '测验1', subject: 'math', createdAt: DateTime(2026, 1, 1),
         rubric: const [RubricItem(questionNumber: 1, type: 'objective', maxPoints: 5, correctAnswer: 'B')],
+        questionPaperPaths: ['/q1.jpg', '/q2.jpg'],
+        answerImagePaths: ['/a1.jpg'],
       ),
     ];
     const subs = [

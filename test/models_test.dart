@@ -20,11 +20,25 @@ void main() {
       id: 't1', name: '测验', subject: 'math',
       createdAt: DateTime(2026, 1, 1),
       rubric: const [RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 10)],
+      questionPaperPaths: const [],
     );
     final back = GradingTask.fromJson(task.toJson());
     expect(back.name, '测验');
     expect(back.rubric.length, 1);
     expect(back.rubric.first.type, 'subjective');
+  });
+
+  test('GradingTask 图片路径序列化', () {
+    final task = GradingTask(
+      id: 't2', name: '单元考', subject: 'math',
+      createdAt: DateTime(2026, 6, 1),
+      rubric: const [RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 4)],
+      questionPaperPaths: ['/path/q1.jpg', '/path/q2.jpg'],
+      answerImagePaths: ['/path/a1.jpg'],
+    );
+    final back = GradingTask.fromJson(task.toJson());
+    expect(back.questionPaperPaths, ['/path/q1.jpg', '/path/q2.jpg']);
+    expect(back.answerImagePaths, ['/path/a1.jpg']);
   });
 
   test('GradedItem 终审分优先于 AI 分', () {

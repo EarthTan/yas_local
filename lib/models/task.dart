@@ -6,6 +6,8 @@ class GradingTask {
   final String subject;
   final DateTime createdAt;
   final List<RubricItem> rubric;
+  final List<String> questionPaperPaths;
+  final List<String> answerImagePaths;
 
   const GradingTask({
     required this.id,
@@ -13,6 +15,8 @@ class GradingTask {
     required this.subject,
     required this.createdAt,
     required this.rubric,
+    required this.questionPaperPaths,
+    this.answerImagePaths = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -21,6 +25,8 @@ class GradingTask {
         'subject': subject,
         'createdAt': createdAt.toIso8601String(),
         'rubric': rubric.map((r) => r.toJson()).toList(),
+        'questionPaperPaths': questionPaperPaths,
+        'answerImagePaths': answerImagePaths,
       };
 
   factory GradingTask.fromJson(Map<String, dynamic> json) => GradingTask(
@@ -31,5 +37,9 @@ class GradingTask {
         rubric: (json['rubric'] as List)
             .map((e) => RubricItem.fromJson(e as Map<String, dynamic>))
             .toList(),
+        questionPaperPaths:
+            (json['questionPaperPaths'] as List?)?.cast<String>() ?? [],
+        answerImagePaths:
+            (json['answerImagePaths'] as List?)?.cast<String>() ?? [],
       );
 }

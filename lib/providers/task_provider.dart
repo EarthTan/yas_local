@@ -85,6 +85,8 @@ class TaskNotifier extends StateNotifier<TaskState> {
               subject: t.subject,
               createdAt: t.createdAt,
               rubric: rubric,
+              questionPaperPaths: t.questionPaperPaths,
+              answerImagePaths: t.answerImagePaths,
             )
           else
             t,
