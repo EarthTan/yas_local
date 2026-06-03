@@ -174,6 +174,7 @@ void main() {
       DebugService.instance.clear();
       expect(DebugService.instance.events, isEmpty);
       expect(DebugService.instance.stateSnapshot, isNull);
+      expect(DebugService.instance.enabled, isTrue); // clear() must not touch _enabled
     });
   });
 }
