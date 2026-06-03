@@ -13,8 +13,8 @@ import 'package:flutter/material.dart';
 ///   "已确认" with a check icon when [confirmed] is `true`. Tapping the chip
 ///   still calls [onConfirm], so the parent can re-open the confirm flow if
 ///   needed.
-/// - The next button keeps the same "下一题 →" label but is disabled when
-///   [isLast] is `true`.
+/// - The next button shows "下一题 →" when [isLast] is `false`, and
+///   "已是最后一题" when [isLast] is `true` (also disabled in that state).
 /// - Both [onRefine] and [onConfirm] are disabled while [isRefining] is
 ///   `true` (e.g. while a chat refinement is in flight), preventing
 ///   overlapping requests.
@@ -68,7 +68,7 @@ class BottomActionBar extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: isLast ? null : onNext,
                 icon: const Icon(Icons.arrow_forward, size: 16),
-                label: const Text('下一题 →'),
+                label: Text(isLast ? '已是最后一题' : '下一题 →'),
               ),
             ),
           ],

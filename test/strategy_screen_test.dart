@@ -86,7 +86,7 @@ void main() {
     expect(tapped, 2);
   });
 
-  testWidgets('BottomActionBar 未确认时显示「确认此题」、最后一题时「下一题」disabled', (tester) async {
+  testWidgets('BottomActionBar 未确认时显示「确认此题」、最后一题时「已是最后一题」disabled', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -102,8 +102,27 @@ void main() {
       ),
     );
     expect(find.text('确认此题'), findsOneWidget);
+    expect(find.text('已是最后一题'), findsOneWidget);
+    // 「已是最后一题」应该是 disabled 的 OutlinedButton —— 仅检查文本存在
+  });
+
+  testWidgets('BottomActionBar 未确认时显示「确认此题」、非最后一题时「下一题 →」enabled', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BottomActionBar(
+            confirmed: false,
+            isLast: false,
+            isRefining: false,
+            onRefine: () {},
+            onConfirm: () {},
+            onNext: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('确认此题'), findsOneWidget);
     expect(find.text('下一题 →'), findsOneWidget);
-    // 「下一题」应该是 disabled 的 OutlinedButton —— 仅检查文本存在
   });
 
   testWidgets('BottomActionBar 已确认时显示「已确认」', (tester) async {
