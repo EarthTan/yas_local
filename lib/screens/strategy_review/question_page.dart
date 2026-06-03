@@ -2,7 +2,31 @@ import 'package:flutter/material.dart';
 import '../../models/checkpoint.dart';
 import '../../models/reference_answer.dart';
 
-class QuestionPage extends StatefulWidget {
+/// Scrollable page showing the per-question strategy review for one rubric item.
+///
+/// **Purely presentational** — this widget does not touch any notifier or
+/// persist state. The parent (`StrategyReviewScreen`) owns the
+/// `ReferenceAnswer` and re-passes it on every rebuild.
+///
+/// **Layout (top → bottom):**
+/// - Header row: `第 N 题`, question-type chip, `maxPoints 分`.
+/// - Optional orange "总分 = X（与满分不一致）" warning when the sum of
+///   checkpoint points does not equal [maxPoints].
+/// - Failure banner (red) when [reference] has no checkpoints. If
+///   [onRetry] is non-null a "重试此题" button is shown next to the banner;
+///   otherwise the banner stands alone.
+/// - One InkWell row per [CheckpointDef]. Tapping a row invokes
+///   [onEditCheckpoint] with that checkpoint's id and definition so the
+///   parent can open the edit sheet.
+/// - "添加得分点" button that fires [onAddCheckpoint].
+/// - Optional "查看 AI 思考过程" expansion tile rendering [reference]'s
+///   `reasoning` text.
+///
+/// **Failure detection:** `failed` is inferred from
+/// `reference.checkpoints.isEmpty`. The retry button only appears when the
+/// parent supplies a non-null [onRetry]; a null retry is the signal to show
+/// the failure banner without an action.
+class QuestionPage extends StatelessWidget {
   final ReferenceAnswer reference;
   final int maxPoints;
   final String questionType;
@@ -21,15 +45,8 @@ class QuestionPage extends StatefulWidget {
   });
 
   @override
-  State<QuestionPage> createState() => _QuestionPageState();
-}
-
-class _QuestionPageState extends State<QuestionPage> {
-  bool _thinkingExpanded = false;
-
-  @override
   Widget build(BuildContext context) {
-    final r = widget.reference;
+    final r = reference;
     final cpSum = r.checkpoints.fold<int>(0, (s, c) => s + c.points);
     final failed = r.checkpoints.isEmpty;
 
@@ -46,15 +63,15 @@ class _QuestionPageState extends State<QuestionPage> {
               ),
               const SizedBox(width: 8),
               Chip(
-                label: Text(widget.questionType, style: const TextStyle(fontSize: 11)),
+                label: Text(questionType, style: const TextStyle(fontSize: 11)),
                 padding: EdgeInsets.zero,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               const Spacer(),
-              Text('${widget.maxPoints} 分', style: TextStyle(color: Colors.grey[600])),
+              Text('$maxPoints 分', style: TextStyle(color: Colors.grey[600])),
             ],
           ),
-          if (cpSum != widget.maxPoints)
+          if (cpSum != maxPoints)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
@@ -76,9 +93,9 @@ class _QuestionPageState extends State<QuestionPage> {
                   const Icon(Icons.error_outline, color: Colors.red, size: 18),
                   const SizedBox(width: 8),
                   const Expanded(child: Text('该题生成失败', style: TextStyle(color: Colors.red))),
-                  if (widget.onRetry != null)
+                  if (onRetry != null)
                     FilledButton.tonal(
-                      onPressed: widget.onRetry,
+                      onPressed: onRetry,
                       child: const Text('重试此题'),
                     ),
                 ],
@@ -86,40 +103,31 @@ class _QuestionPageState extends State<QuestionPage> {
             ),
             const SizedBox(height: 12),
           ],
-          if (r.checkpoints.isEmpty && !failed)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                '暂无批改策略（AI 未能生成，可通过对话描述要求）',
-                style: TextStyle(color: Colors.orange[700], fontStyle: FontStyle.italic),
-              ),
-            )
-          else
-            ...r.checkpoints.map(
-              (c) => InkWell(
-                onTap: () => widget.onEditCheckpoint(c.id, c),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                  margin: const EdgeInsets.only(bottom: 4),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                      Expanded(child: Text(c.description)),
-                      const SizedBox(width: 8),
-                      Text('${c.points}分',
-                          style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
-                    ],
-                  ),
+          ...r.checkpoints.map(
+            (c) => InkWell(
+              onTap: () => onEditCheckpoint(c.id, c),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                margin: const EdgeInsets.only(bottom: 4),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Expanded(child: Text(c.description)),
+                    const SizedBox(width: 8),
+                    Text('${c.points}分',
+                        style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
+                  ],
                 ),
               ),
             ),
+          ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: widget.onAddCheckpoint,
+            onPressed: onAddCheckpoint,
             icon: const Icon(Icons.add, size: 16),
             label: const Text('添加得分点'),
           ),
@@ -129,8 +137,6 @@ class _QuestionPageState extends State<QuestionPage> {
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.symmetric(vertical: 8),
               title: const Text('查看 AI 思考过程', style: TextStyle(fontSize: 13)),
-              onExpansionChanged: (v) => setState(() => _thinkingExpanded = v),
-              initiallyExpanded: _thinkingExpanded,
               children: [
                 Container(
                   width: double.infinity,

@@ -268,4 +268,114 @@ void main() {
     expect(find.text('3分'), findsOneWidget);
     expect(find.text('2分'), findsOneWidget);
   });
+
+  testWidgets('QuestionPage 点击 checkpoint 行触发 onEditCheckpoint', (tester) async {
+    var editId = '';
+    var editCpDescription = '';
+    var editCpPoints = -1;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 1,
+              checkpoints: [
+                CheckpointDef(id: 'q1-cp0', description: '答对', points: 3),
+                CheckpointDef(id: 'q1-cp1', description: '完整', points: 2),
+              ],
+            ),
+            maxPoints: 5,
+            questionType: '主观题',
+            onEditCheckpoint: (id, cp) {
+              editId = id;
+              editCpDescription = cp.description;
+              editCpPoints = cp.points;
+            },
+            onAddCheckpoint: () {},
+          ),
+        ),
+      ),
+    );
+    // Tap the first checkpoint row via its description text's InkWell ancestor.
+    final firstRow = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+    await tester.tap(firstRow);
+    await tester.pump();
+    expect(editId, 'q1-cp0');
+    expect(editCpDescription, '答对');
+    expect(editCpPoints, 3);
+  });
+
+  testWidgets('QuestionPage 失败状态渲染 banner 和重试按钮，点击触发 onRetry', (tester) async {
+    var retryCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 2,
+              checkpoints: [],
+            ),
+            maxPoints: 5,
+            questionType: '主观题',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+            onRetry: () => retryCount++,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('该题生成失败'), findsOneWidget);
+    expect(find.text('重试此题'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '重试此题'));
+    await tester.pump();
+    expect(retryCount, 1);
+  });
+
+  testWidgets('QuestionPage checkpoint 分值合计与满分不一致时显示警告', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 3,
+              checkpoints: [
+                CheckpointDef(id: 'q3-cp0', description: '答对', points: 3),
+                CheckpointDef(id: 'q3-cp1', description: '完整', points: 2),
+              ],
+            ),
+            maxPoints: 7, // sum is 5, but max is 7
+            questionType: '主观题',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('总分 = 5（与满分不一致，请确认是否需要调整）'), findsOneWidget);
+  });
+
+  testWidgets('QuestionPage 点击「添加得分点」触发 onAddCheckpoint', (tester) async {
+    var addCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 1,
+              checkpoints: [
+                CheckpointDef(id: 'q1-cp0', description: '答对', points: 5),
+              ],
+            ),
+            maxPoints: 5,
+            questionType: '主观题',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () => addCount++,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, '添加得分点'));
+    await tester.pump();
+    expect(addCount, 1);
+  });
 }
