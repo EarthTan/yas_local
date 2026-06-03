@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Status of a Qwen HTTP call as observed by DebugService.
 enum QwenCallStatus {
   /// HTTP 2xx, response received and parsed successfully.
@@ -128,10 +130,15 @@ class DebugService {
 
   void setEnabled(bool value) {
     _enabled = value;
+    debugPrint('[DEBUG-SVC] setEnabled($value) at ${_callerFrame()}');
   }
 
   void recordQwenCall(QwenCallRecord record) {
-    if (!_enabled) return;
+    if (!_enabled) {
+      debugPrint('[DEBUG-SVC] recordQwenCall DROPPED scope=${record.scope} enabled=false');
+      return;
+    }
+    debugPrint('[DEBUG-SVC] recordQwenCall KEPT scope=${record.scope}');
     _qwenCalls.add(record);
     if (_qwenCalls.length > qwenCapacity) {
       _qwenCalls.removeAt(0);
@@ -144,7 +151,11 @@ class DebugService {
     EventLevel level = EventLevel.info,
     Map<String, Object?>? data,
   }) {
-    if (!_enabled) return;
+    if (!_enabled) {
+      debugPrint('[DEBUG-SVC] recordEvent DROPPED scope=$scope enabled=false');
+      return;
+    }
+    debugPrint('[DEBUG-SVC] recordEvent KEPT scope=$scope');
     _events.add(EventRecord(
       timestamp: DateTime.now(),
       scope: scope,
@@ -158,7 +169,11 @@ class DebugService {
   }
 
   void recordJsonAttempt(JsonAttemptRecord record) {
-    if (!_enabled) return;
+    if (!_enabled) {
+      debugPrint('[DEBUG-SVC] recordJsonAttempt DROPPED scope=${record.scope} enabled=false');
+      return;
+    }
+    debugPrint('[DEBUG-SVC] recordJsonAttempt KEPT scope=${record.scope}');
     _jsonAttempts.add(record);
     if (_jsonAttempts.length > jsonAttemptCapacity) {
       _jsonAttempts.removeAt(0);
@@ -185,6 +200,27 @@ class DebugService {
     _events.clear();
     _jsonAttempts.clear();
     _stateSnapshot = null;
+  }
+
+  /// Best-effort: return the first frame of the current call stack that is
+  /// neither setEnabled itself nor this helper. Used only for diagnostic
+  /// logging — never for control flow.
+  static String _callerFrame() {
+    try {
+      final frames = StackTrace.current.toString().split('\n');
+      for (final f in frames) {
+        final t = f.trim();
+        if (t.isEmpty) continue;
+        if (t.contains('DebugService.setEnabled')) continue;
+        if (t.contains('DebugService._callerFrame')) continue;
+        if (t.contains('DebugService.recordQwenCall')) continue;
+        if (t.contains('DebugService.recordEvent')) continue;
+        if (t.contains('DebugService.recordJsonAttempt')) continue;
+        final m = RegExp(r'#\d+\s+([^<(]+)').firstMatch(t);
+        if (m != null) return m.group(1)!.trim();
+      }
+    } catch (_) {}
+    return '?';
   }
 
   /// Test-only helper. Resets the enabled flag and clears all ring buffers +
