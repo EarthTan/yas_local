@@ -161,12 +161,27 @@ class QwenService {
       options: Options(extra: {'_qwen_scope': 'strategy'}),
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireObjectWithReasoning(content);
-    return _parseReferenceAnswer(
-      rubricItem.questionNumber,
-      payload.json,
-      reasoning: payload.reasoning,
-    );
+    try {
+      final payload = JsonExtractor.requireObjectWithReasoning(content);
+      return _parseReferenceAnswer(
+        rubricItem.questionNumber,
+        payload.json,
+        reasoning: payload.reasoning,
+      );
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'strategy',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<ReferenceAnswer> refineStrategy({
@@ -208,12 +223,27 @@ class QwenService {
       options: Options(extra: {'_qwen_scope': 'refine'}),
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireObjectWithReasoning(content);
-    return _parseReferenceAnswer(
-      current.questionNumber,
-      payload.json,
-      reasoning: payload.reasoning,
-    );
+    try {
+      final payload = JsonExtractor.requireObjectWithReasoning(content);
+      return _parseReferenceAnswer(
+        current.questionNumber,
+        payload.json,
+        reasoning: payload.reasoning,
+      );
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'refine',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: messages, // one-shot chat, useful to see what we sent
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
@@ -251,11 +281,26 @@ class QwenService {
       options: Options(extra: {'_qwen_scope': 'identify'}),
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
-    // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
-    return payload.list
-        .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
-        .toList();
+    try {
+      final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+      // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
+      return payload.list
+          .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
+          .toList();
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'identify',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<List<QuestionGradeResult>> gradePaper({
@@ -313,28 +358,43 @@ class QwenService {
       options: Options(extra: {'_qwen_scope': 'grade'}),
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
-    // reasoning 丢弃：批改的思考过程不暴露给学生/老师
-    return payload.list.map((q) {
-      final qNum = q['number'] is int
-          ? q['number'] as int
-          : int.tryParse(q['number'].toString()) ?? 0;
-      final cps = (q['checkpoints'] as List? ?? [])
-          .map((c) => CheckpointResult(
-                description: (c['description'] ?? '').toString(),
-                passed: c['passed'] as bool? ?? false,
-                pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-                reason: (c['reason'] ?? '').toString(),
-              ))
-          .toList();
-      return QuestionGradeResult(
-        questionNumber: qNum,
-        extractedAnswer: (q['extracted_answer'] ?? '').toString(),
-        checkpoints: cps,
-        confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
-        overallComment: q['overall_comment'] as String?,
-      );
-    }).toList();
+    try {
+      final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+      // reasoning 丢弃：批改的思考过程不暴露给学生/老师
+      return payload.list.map((q) {
+        final qNum = q['number'] is int
+            ? q['number'] as int
+            : int.tryParse(q['number'].toString()) ?? 0;
+        final cps = (q['checkpoints'] as List? ?? [])
+            .map((c) => CheckpointResult(
+                  description: (c['description'] ?? '').toString(),
+                  passed: c['passed'] as bool? ?? false,
+                  pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
+                  reason: (c['reason'] ?? '').toString(),
+                ))
+            .toList();
+        return QuestionGradeResult(
+          questionNumber: qNum,
+          extractedAnswer: (q['extracted_answer'] ?? '').toString(),
+          checkpoints: cps,
+          confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
+          overallComment: q['overall_comment'] as String?,
+        );
+      }).toList();
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'grade',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   ReferenceAnswer _parseReferenceAnswer(

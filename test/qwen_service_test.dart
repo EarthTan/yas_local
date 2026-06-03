@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/settings.dart';
 import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/json_extractor.dart';
 import 'package:yas_local/services/qwen_service.dart';
 
 class _MockAdapter implements HttpClientAdapter {
@@ -87,5 +88,28 @@ void main() {
     await svc.identifyQuestions(const []);
 
     expect(DebugService.instance.qwenCalls, isEmpty);
+  });
+
+  test('AI returns invalid JSON → records parseError + rethrows', () async {
+    DebugService.instance.setEnabled(true);
+    final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
+    final svc = QwenService(s);
+    svc.dio.httpClientAdapter = _MockAdapter((options) {
+      return ResponseBody.fromString(
+        '{"choices":[{"message":{"content":"this is not json at all"}}]}',
+        200,
+        headers: {'content-type': ['application/json']},
+      );
+    });
+
+    await expectLater(
+        () => svc.identifyQuestions(const []), throwsA(isA<JsonParseException>()));
+
+    final calls = DebugService.instance.qwenCalls;
+    // Expect at least one ok (from interceptor) AND one parseError (from the catch)
+    expect(calls.length, greaterThanOrEqualTo(2));
+    expect(calls.any((c) => c.status == QwenCallStatus.ok), isTrue);
+    expect(calls.last.status, QwenCallStatus.parseError);
+    expect(calls.last.errorMessage, contains('JsonParseException'));
   });
 }
