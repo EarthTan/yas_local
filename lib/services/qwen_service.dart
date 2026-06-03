@@ -360,31 +360,6 @@ class QwenService {
     );
   }
 
-  static String? _summarizeRequest(List<Map<String, dynamic>> messages) {
-    if (messages.isEmpty) return null;
-    final buf = StringBuffer();
-    for (final m in messages) {
-      final role = (m['role'] ?? '?').toString();
-      final content = m['content'];
-      if (content is List) {
-        final textParts = content
-            .whereType<Map>()
-            .map((e) => e['text'])
-            .whereType<String>()
-            .where((t) => !t.startsWith('data:'))
-            .join(' | ');
-        final imgCount = content
-            .whereType<Map>()
-            .where((e) => e['type'] == 'image_url')
-            .length;
-        buf.writeln('[$role] ($imgCount images) $textParts');
-      } else {
-        buf.writeln('[$role] ${content ?? ""}');
-      }
-    }
-    return buf.toString().trimRight();
-  }
-
   static String _mimeType(String path) {
     final ext = path.split('.').last.toLowerCase();
     return switch (ext) {
