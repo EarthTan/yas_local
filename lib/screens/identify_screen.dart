@@ -26,7 +26,7 @@ class _EditableQuestion {
     required String questionText,
     required this.type,
   })  : textCtrl = TextEditingController(text: questionText),
-        pointsCtrl = TextEditingController(),
+        pointsCtrl = TextEditingController(text: '4'),
         answerCtrl = TextEditingController();
 
   void dispose() {
@@ -112,7 +112,7 @@ class _S extends ConsumerState<IdentifyScreen> {
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('AI 正在识别作业题目…'),
+              Text('AI 正在识别试卷题目…'),
             ],
           ),
         ),

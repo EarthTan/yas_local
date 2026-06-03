@@ -139,14 +139,14 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   ? () async {
                       await notifier.saveAllConfirmed(widget.taskId);
                       if (mounted) {
-                        context.pushReplacement('/tasks/${widget.taskId}/grading');
+                        context.pushReplacement('/tasks/${widget.taskId}');
                       }
                     }
                   : null,
-              icon: const Icon(Icons.play_arrow),
+              icon: const Icon(Icons.check),
               label: Text(allDone
-                  ? '开始批改'
-                  : '开始批改（$confirmed/$total 道题已确认）'),
+                  ? '完成'
+                  : '完成（$confirmed/$total 道题已确认）'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
               ),

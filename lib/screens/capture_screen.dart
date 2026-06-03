@@ -62,20 +62,14 @@ class _S extends ConsumerState<CaptureScreen> {
     }
     await ref.read(taskProvider.notifier).setSubmissions(widget.taskId, subs);
     if (!mounted) return;
-    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
-    final hasRubric = task != null && task.rubric.isNotEmpty;
-    context.pushReplacement(
-      hasRubric
-          ? '/tasks/${widget.taskId}/strategy'
-          : '/tasks/${widget.taskId}/identify',
-    );
+    context.pushReplacement('/tasks/${widget.taskId}');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('拍摄作业'),
+        title: const Text('上传学生作业'),
         actions: [
           if (_photos.isNotEmpty)
             TextButton(
@@ -89,7 +83,7 @@ class _S extends ConsumerState<CaptureScreen> {
       body: Column(children: [
         Expanded(
           child: _photos.isEmpty
-              ? const Center(child: Text('点击下方拍照或从相册选择'))
+              ? const Center(child: Text('点击下方拍照或从相册选择学生作业'))
               : GridView.builder(
                   padding: const EdgeInsets.all(8),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4),

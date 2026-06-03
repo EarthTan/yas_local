@@ -6,6 +6,24 @@ import '../models/submission.dart';
 import '../providers/task_provider.dart';
 import '../services/reference_store.dart';
 
+enum ResultsSectionStatus {
+  waitingForStrategy,
+  waitingForSubmissions,
+  readyToGrade,
+  hasResults,
+}
+
+ResultsSectionStatus resolveResultsState({
+  required bool allConfirmed,
+  required int subCount,
+  required bool hasGradingResults,
+}) {
+  if (hasGradingResults) return ResultsSectionStatus.hasResults;
+  if (!allConfirmed) return ResultsSectionStatus.waitingForStrategy;
+  if (subCount == 0) return ResultsSectionStatus.waitingForSubmissions;
+  return ResultsSectionStatus.readyToGrade;
+}
+
 class TaskDetailScreen extends ConsumerStatefulWidget {
   final String taskId;
   const TaskDetailScreen({super.key, required this.taskId});
@@ -78,6 +96,12 @@ class _S extends ConsumerState<TaskDetailScreen> {
                   if (hasRubric)
                     Text('共 ${task.rubric.length} 道题 · 满分 $totalPoints 分',
                         style: TextStyle(color: Colors.grey[600])),
+                  if (task.questionPaperPaths.isNotEmpty)
+                    Text('题目照片 ${task.questionPaperPaths.length} 张',
+                        style: TextStyle(color: Colors.grey[600])),
+                  if (task.answerImagePaths.isNotEmpty)
+                    Text('答案照片 ${task.answerImagePaths.length} 张',
+                        style: TextStyle(color: Colors.grey[600])),
                   Text('已上传 ${subs.length} 份 · 已批改 $gradedCount 份',
                       style: TextStyle(color: Colors.grey[600])),
                 ],
@@ -91,16 +115,10 @@ class _S extends ConsumerState<TaskDetailScreen> {
           const SizedBox(height: 8),
           if (_loadingRefs)
             const Center(child: CircularProgressIndicator())
-          else if (subs.isEmpty)
-            _infoTile(
-              Icons.info_outline,
-              '请先上传作业图片',
-              Colors.grey,
-            )
           else if (!hasRubric)
             _infoTile(
-              Icons.find_in_page,
-              '作业已上传，题目待 AI 识别',
+              Icons.photo_library,
+              '题目照片已上传，待 AI 识别',
               Colors.orange,
             )
           else if (!hasRefs)
@@ -122,7 +140,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
               Colors.orange,
             ),
           const SizedBox(height: 8),
-          if (!_loadingRefs && subs.isNotEmpty) ...[
+          if (!_loadingRefs) ...[
             if (!hasRubric)
               OutlinedButton.icon(
                 onPressed: () => context.push('/tasks/${widget.taskId}/identify'),
@@ -145,21 +163,44 @@ class _S extends ConsumerState<TaskDetailScreen> {
           // Results section
           _sectionHeader('批改结果'),
           const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: () => context.push('/tasks/${widget.taskId}/results'),
-            icon: const Icon(Icons.bar_chart),
-            label: Text(hasGradingResults ? '查看批改结果' : '暂无结果（策略确认后可开始批改）'),
-          ),
-
-          if (showRegrade) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.deepOrange),
-              onPressed: _showRegradeDialog,
-              icon: const Icon(Icons.refresh),
-              label: const Text('重新批改'),
-            ),
-          ],
+          if (_loadingRefs)
+            const Center(child: CircularProgressIndicator())
+          else
+            ...switch (resolveResultsState(
+              allConfirmed: allConfirmed,
+              subCount: subs.length,
+              hasGradingResults: hasGradingResults,
+            )) {
+              ResultsSectionStatus.hasResults => [
+                FilledButton.icon(
+                  onPressed: () => context.push('/tasks/${widget.taskId}/results'),
+                  icon: const Icon(Icons.bar_chart),
+                  label: const Text('查看批改结果'),
+                ),
+                if (showRegrade) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.deepOrange),
+                    onPressed: _showRegradeDialog,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重新批改'),
+                  ),
+                ],
+              ],
+              ResultsSectionStatus.readyToGrade => [
+                FilledButton.icon(
+                  onPressed: () => context.push('/tasks/${widget.taskId}/grading'),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始批改'),
+                ),
+              ],
+              ResultsSectionStatus.waitingForSubmissions => [
+                _infoTile(Icons.upload_file, '请先上传学生作业', Colors.orange),
+              ],
+              ResultsSectionStatus.waitingForStrategy => [
+                _infoTile(Icons.pending_actions, '请先完善并确认批改策略', Colors.grey),
+              ],
+            },
 
           const SizedBox(height: 24),
 
@@ -169,7 +210,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
           OutlinedButton.icon(
             onPressed: () => context.push('/tasks/${widget.taskId}/capture'),
             icon: const Icon(Icons.add_a_photo),
-            label: const Text('继续添加作业'),
+            label: const Text('上传学生作业'),
           ),
         ],
       ),
