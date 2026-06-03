@@ -161,9 +161,39 @@ class _Section extends StatelessWidget {
 
 class _EventsTab extends ConsumerWidget {
   const _EventsTab();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return const Center(child: Text('事件流 tab placeholder'));
+    final events = ref.watch(debugProvider).events.reversed.toList();
+    if (events.isEmpty) {
+      return const Center(
+        child: Text('暂无事件', style: TextStyle(color: Colors.black)),
+      );
+    }
+    return ListView.builder(
+      itemCount: events.length,
+      itemBuilder: (context, i) {
+        final e = events[i];
+        final ts = e.timestamp.toIso8601String().substring(11, 19);
+        Color? bg;
+        Color fg = const Color(0xFF111827);
+        if (e.level == EventLevel.error) {
+          bg = const Color(0xFFFEF2F2);
+          fg = const Color(0xFF7F1D1D);
+        } else if (e.level == EventLevel.warn) {
+          bg = const Color(0xFFFFFBEB);
+          fg = const Color(0xFF78350F);
+        }
+        return Container(
+          color: bg,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Text(
+            '$ts  [${e.scope}]  ${e.message}',
+            style: TextStyle(color: fg, fontFamily: 'monospace', fontSize: 12),
+          ),
+        );
+      },
+    );
   }
 }
 
