@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/models/checkpoint.dart';
+import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/screens/strategy_review/bottom_action_bar.dart';
 import 'package:yas_local/screens/strategy_review/edit_checkpoint_sheet.dart';
 import 'package:yas_local/screens/strategy_review/progress_dots.dart';
+import 'package:yas_local/screens/strategy_review/question_page.dart';
 
 void main() {
   testWidgets('EditCheckpointSheet 编辑模式：保存按钮初始 enabled', (tester) async {
@@ -237,5 +240,32 @@ void main() {
       tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '下一题 →')).onPressed,
       isNotNull,
     );
+  });
+
+  testWidgets('QuestionPage 渲染 checkpoint 描述与分值', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 1,
+              checkpoints: [
+                CheckpointDef(id: 'q1-cp0', description: '答对', points: 3),
+                CheckpointDef(id: 'q1-cp1', description: '完整', points: 2),
+              ],
+            ),
+            maxPoints: 5,
+            questionType: '主观题',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+            onRetry: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('答对'), findsOneWidget);
+    expect(find.text('完整'), findsOneWidget);
+    expect(find.text('3分'), findsOneWidget);
+    expect(find.text('2分'), findsOneWidget);
   });
 }
