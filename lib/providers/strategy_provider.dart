@@ -3,6 +3,7 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/strategy_message.dart';
 import '../models/task.dart';
+import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
@@ -95,6 +96,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       genDone: 0,
     );
 
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'strategy generate 开始（${rubric.length} 题）',
+    );
+
     final qwen = QwenService(settings);
     final references = <ReferenceAnswer>[];
     String? firstError;
@@ -108,6 +114,10 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
           totalQuestions: rubric.length,
         );
         references.add(ref);
+        DebugService.instance.recordEvent(
+          scope: 'task:$taskId / q:${item.questionNumber}',
+          message: '生成 checkpoints（${ref.checkpoints.length} 个）',
+        );
       } catch (e) {
         firstError ??= ErrorFormatter.format(e);
         references.add(ReferenceAnswer(
@@ -115,6 +125,12 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
           checkpoints: [],
           hasConsensus: false,
         ));
+        DebugService.instance.recordEvent(
+          scope: 'task:$taskId / q:${item.questionNumber}',
+          message: '生成失败',
+          level: EventLevel.error,
+          data: {'error': e.toString()},
+        );
       }
       state = state.copyWith(
         genDone: state.genDone + 1,
@@ -126,6 +142,10 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       generating: false,
       error: firstError,
       references: List.unmodifiable(references),
+    );
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'strategy generate 结束',
     );
   }
 
@@ -167,6 +187,10 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     ];
 
     try {
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId / q:$questionNum',
+        message: 'refine 开始',
+      );
       final qwen = QwenService(settings);
       final updated = await qwen.refineStrategy(
         rubric: rubricItem,
@@ -195,6 +219,10 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       final newRefs = [...state.references];
       newRefs[refIndex] = newRef;
       state = state.copyWith(refining: false, refiningQuestion: null, references: newRefs);
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId / q:$questionNum',
+        message: 'refine 完成',
+      );
     } catch (e) {
       // On error, still record the user message in history
       final newRef = current.copyWith(chatHistory: [
@@ -204,6 +232,12 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       final newRefs = [...state.references];
       newRefs[refIndex] = newRef;
       state = state.copyWith(refining: false, refiningQuestion: null, references: newRefs);
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId / q:$questionNum',
+        message: 'refine 失败',
+        level: EventLevel.error,
+        data: {'error': e.toString()},
+      );
     }
   }
 
