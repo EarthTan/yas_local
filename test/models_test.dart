@@ -63,7 +63,7 @@ void main() {
   });
 
   test('CheckpointDef JSON 往返', () {
-    const def = CheckpointDef(description: '正确建立方程', points: 2);
+    const def = CheckpointDef(id: 'q1-cp0', description: '正确建立方程', points: 2);
     final back = CheckpointDef.fromJson(def.toJson());
     expect(back.description, '正确建立方程');
     expect(back.points, 2);
@@ -85,7 +85,7 @@ void main() {
   test('ReferenceAnswer JSON 往返', () {
     final ref = ReferenceAnswer(
       questionNumber: 2,
-      checkpoints: const [CheckpointDef(description: '求解 x', points: 3)],
+      checkpoints: const [CheckpointDef(id: 'q2-cp0', description: '求解 x', points: 3)],
       equivalentForms: const ['x=3', '3'],
       hasConsensus: true,
     );

@@ -14,7 +14,7 @@ class _AllConfirmedNotifier extends StrategyNotifier {
       references: [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: [CheckpointDef(description: '答对', points: 5)],
+          checkpoints: [CheckpointDef(id: 'q1-cp0', description: '答对', points: 5)],
           confirmed: true,
         ),
       ],

@@ -40,7 +40,7 @@ void main() {
     final refs = [
       ReferenceAnswer(
         questionNumber: 1,
-        checkpoints: const [CheckpointDef(description: '答对', points: 5)],
+        checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 5)],
       ),
     ];
     final decoded = ReferenceStore.decode(ReferenceStore.encode(refs));
