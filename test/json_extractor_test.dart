@@ -267,5 +267,31 @@ void main() {
       expect(r.attempts.where((a) => !a.ok), isNotEmpty); // braces_object failed
       expect(r.finalException, isNotNull);
     });
+
+    test('successful list extraction records an attempt', () {
+      JsonExtractor.requireList('[1, 2, 3]');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
+    });
+
+    test('failed list extraction records finalException', () {
+      try {
+        JsonExtractor.requireList('not a list');
+      } catch (_) {}
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      expect(r.attempts.where((a) => !a.ok), isNotEmpty);
+      expect(r.finalException, isNotNull);
+    });
+
+    test('fromKey success records the fromKey method name', () {
+      JsonExtractor.requireList('{"questions": [1, 2]}', fromKey: 'questions');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      final fromKeyAttempt = r.attempts.firstWhere(
+        (a) => a.method.endsWith('_with_fromKey'),
+      );
+      expect(fromKeyAttempt.ok, isTrue);
+    });
   });
 }

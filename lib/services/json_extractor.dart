@@ -109,6 +109,8 @@ class JsonExtractor {
         if (fromKey != null) {
           final obj = _tryObject(block);
           if (obj != null && obj[fromKey] is List) {
+            builder.record('fence_object_with_fromKey', ok: true);
+            builder.commit();
             return obj[fromKey] as List<dynamic>;
           }
           if (obj != null) {
@@ -128,10 +130,12 @@ class JsonExtractor {
       if (fromKey != null) {
         final obj = _tryObject(cleaned);
         if (obj != null && obj[fromKey] is List) {
+          builder.record('braces_object_with_fromKey', ok: true);
+          builder.commit();
           return obj[fromKey] as List<dynamic>;
         }
         if (obj != null) {
-          builder.record('fence_object_with_fromKey',
+          builder.record('braces_object_with_fromKey',
               ok: false, error: 'key missing or not a list');
         }
       }
