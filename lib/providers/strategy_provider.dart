@@ -297,7 +297,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       ],
     );
     DebugService.instance.recordEvent(
-      scope: 'task:${ref.read(taskProvider).tasks.isNotEmpty ? ref.read(taskProvider).tasks.first.id : "?"} / q:$questionNumber',
+      scope: 'strategy / q:$questionNumber',
       message: 'editCheckpoint $checkpointId',
     );
   }
