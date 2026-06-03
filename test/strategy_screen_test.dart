@@ -20,7 +20,8 @@ void main() {
     );
     expect(find.text('A'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('保存'), findsOneWidget);
+    final FilledButton save = tester.widget(find.widgetWithText(FilledButton, '保存'));
+    expect(save.onPressed, isNotNull);
   });
 
   testWidgets('EditCheckpointSheet 描述清空后保存按钮 disabled', (tester) async {

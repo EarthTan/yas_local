@@ -2,6 +2,22 @@ import 'package:flutter/material.dart';
 
 enum EditCheckpointMode { edit, add }
 
+/// Modal bottom sheet for editing or adding a single checkpoint.
+///
+/// **Required inputs:**
+/// - [initialDescription] / [initialPoints] — the checkpoint's current values
+///   (used to pre-fill the form fields).
+/// - [currentTotal] — the sum of OTHER checkpoints' points for the same question
+///   (i.e., excluding this one). Used to compute the "all checkpoints now sum to X"
+///   warning. In `edit` mode, the sheet's own [initialPoints] is not in [currentTotal];
+///   in `add` mode, the new checkpoint isn't either.
+/// - [maxPoints] — the question's total available points. When non-null and the
+///   computed total (with the proposed edit applied) doesn't match, an orange
+///   warning is shown. Non-blocking.
+/// - [onSave] — receives the trimmed description and the new points value, then
+///   the sheet pops itself. Caller is responsible for applying the change.
+/// - [onDelete] — when non-null, a red "删除" button is shown. Sheet does not
+///   pop after delete; the caller decides whether to confirm.
 class EditCheckpointSheet extends StatefulWidget {
   final EditCheckpointMode mode;
   final String initialDescription;
