@@ -8,6 +8,7 @@ class ReferenceAnswer {
   final bool hasConsensus;
   final bool confirmed;
   final List<StrategyMessage> chatHistory;
+  final String? reasoning;
 
   const ReferenceAnswer({
     required this.questionNumber,
@@ -16,6 +17,7 @@ class ReferenceAnswer {
     this.hasConsensus = true,
     this.confirmed = false,
     this.chatHistory = const [],
+    this.reasoning,
   });
 
   ReferenceAnswer copyWith({
@@ -24,6 +26,7 @@ class ReferenceAnswer {
     bool? hasConsensus,
     bool? confirmed,
     List<StrategyMessage>? chatHistory,
+    String? reasoning,
   }) =>
       ReferenceAnswer(
         questionNumber: questionNumber,
@@ -32,6 +35,7 @@ class ReferenceAnswer {
         hasConsensus: hasConsensus ?? this.hasConsensus,
         confirmed: confirmed ?? this.confirmed,
         chatHistory: chatHistory ?? this.chatHistory,
+        reasoning: reasoning ?? this.reasoning,
       );
 
   Map<String, dynamic> toJson() => {
@@ -41,6 +45,7 @@ class ReferenceAnswer {
         'hasConsensus': hasConsensus,
         'confirmed': confirmed,
         'chatHistory': chatHistory.map((m) => m.toJson()).toList(),
+        'reasoning': reasoning,
       };
 
   factory ReferenceAnswer.fromJson(Map<String, dynamic> json) => ReferenceAnswer(
@@ -56,5 +61,6 @@ class ReferenceAnswer {
         chatHistory: (json['chatHistory'] as List? ?? [])
             .map((e) => StrategyMessage.fromJson(e as Map<String, dynamic>))
             .toList(),
+        reasoning: json['reasoning'] as String?,
       );
 }

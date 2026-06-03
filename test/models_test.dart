@@ -106,6 +106,40 @@ void main() {
     expect(ReferenceAnswer.fromJson(ref.toJson()).hasConsensus, false);
   });
 
+  test('ReferenceAnswer reasoning 字段 round-trip', () {
+    const ref = ReferenceAnswer(
+      questionNumber: 4,
+      checkpoints: [],
+      reasoning: '考查牛顿第二定律的应用，关键步骤是受力分析。',
+    );
+    final back = ReferenceAnswer.fromJson(ref.toJson());
+    expect(back.reasoning, '考查牛顿第二定律的应用，关键步骤是受力分析。');
+  });
+
+  test('ReferenceAnswer 旧数据无 reasoning 字段时为 null（向后兼容）', () {
+    final json = {
+      'questionNumber': 5,
+      'checkpoints': [],
+      'equivalentForms': <String>[],
+      'hasConsensus': true,
+      'confirmed': false,
+      'chatHistory': <Map<String, dynamic>>[],
+    };
+    final back = ReferenceAnswer.fromJson(json);
+    expect(back.reasoning, isNull);
+  });
+
+  test('ReferenceAnswer copyWith 保留 reasoning', () {
+    const ref = ReferenceAnswer(
+      questionNumber: 6,
+      checkpoints: [],
+      reasoning: '原始思考',
+    );
+    final updated = ref.copyWith(confirmed: true);
+    expect(updated.reasoning, '原始思考');
+    expect(updated.confirmed, true);
+  });
+
   group('IdentifiedQuestion', () {
     test('fromJson parses correctly', () {
       final q = IdentifiedQuestion.fromJson({

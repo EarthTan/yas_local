@@ -7,6 +7,7 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
+import 'json_extractor.dart';
 import 'prompts.dart';
 import 'qwen_logger.dart';
 
@@ -152,7 +153,12 @@ class QwenService {
       ],
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
-    return _parseReferenceAnswer(rubricItem.questionNumber, _extractJson(content) ?? {});
+    final payload = JsonExtractor.requireObjectWithReasoning(content);
+    return _parseReferenceAnswer(
+      rubricItem.questionNumber,
+      payload.json,
+      reasoning: payload.reasoning,
+    );
   }
 
   Future<ReferenceAnswer> refineStrategy({
@@ -190,7 +196,12 @@ class QwenService {
       'messages': messages,
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
-    return _parseReferenceAnswer(current.questionNumber, _extractJson(content) ?? {});
+    final payload = JsonExtractor.requireObjectWithReasoning(content);
+    return _parseReferenceAnswer(
+      current.questionNumber,
+      payload.json,
+      reasoning: payload.reasoning,
+    );
   }
 
   Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
@@ -224,11 +235,9 @@ class QwenService {
       ],
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final parsed = _extractJson(content);
-    final qs = (parsed?['questions'] as List?)
-        ?? _extractList(content)
-        ?? [];
-    return qs
+    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+    // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
+    return payload.list
         .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
         .toList();
   }
@@ -284,11 +293,9 @@ class QwenService {
       ],
     });
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final parsed = _extractJson(content);
-    final qs = (parsed?['questions'] as List?)
-        ?? _extractList(content)
-        ?? [];
-    return qs.map((q) {
+    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+    // reasoning 丢弃：批改的思考过程不暴露给学生/老师
+    return payload.list.map((q) {
       final qNum = q['number'] is int
           ? q['number'] as int
           : int.tryParse(q['number'].toString()) ?? 0;
@@ -310,7 +317,11 @@ class QwenService {
     }).toList();
   }
 
-  ReferenceAnswer _parseReferenceAnswer(int questionNumber, Map<String, dynamic> json) {
+  ReferenceAnswer _parseReferenceAnswer(
+    int questionNumber,
+    Map<String, dynamic> json, {
+    String? reasoning,
+  }) {
     final checkpoints = (json['checkpoints'] as List? ?? [])
         .map((c) => CheckpointDef(
               description: (c['description'] ?? '').toString(),
@@ -325,13 +336,9 @@ class QwenService {
       checkpoints: checkpoints,
       equivalentForms: equivalentForms,
       hasConsensus: json['has_consensus'] as bool? ?? true,
+      reasoning: reasoning,
     );
   }
-
-  /// Strip `<think>...</think>` blocks emitted by reasoning models (Qwen3, DeepSeek-R1, etc.)
-  /// before attempting JSON extraction, otherwise the first `{` lands inside the thinking block.
-  String _stripThinking(String text) =>
-      text.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
 
   static String? _summarizeRequest(List<Map<String, dynamic>> messages) {
     if (messages.isEmpty) return null;
@@ -369,27 +376,4 @@ class QwenService {
     };
   }
 
-  Map<String, dynamic>? _extractJson(String text) {
-    final cleaned = _stripThinking(text);
-    final start = cleaned.indexOf('{');
-    final end = cleaned.lastIndexOf('}');
-    if (start == -1 || end == -1 || end <= start) return null;
-    try {
-      return jsonDecode(cleaned.substring(start, end + 1)) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  List<dynamic>? _extractList(String text) {
-    final cleaned = _stripThinking(text);
-    final start = cleaned.indexOf('[');
-    final end = cleaned.lastIndexOf(']');
-    if (start == -1 || end == -1 || end <= start) return null;
-    try {
-      return jsonDecode(cleaned.substring(start, end + 1)) as List<dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
 }

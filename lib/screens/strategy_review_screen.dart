@@ -177,6 +177,7 @@ class _QuestionCard extends ConsumerStatefulWidget {
 
 class _QCS extends ConsumerState<_QuestionCard> {
   bool _chatExpanded = false;
+  bool _thinkingExpanded = false;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -250,6 +251,49 @@ class _QCS extends ConsumerState<_QuestionCard> {
                   )),
 
             const SizedBox(height: 12),
+
+            // AI reasoning section
+            if (r.reasoning != null && r.reasoning!.isNotEmpty) ...[
+              InkWell(
+                onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
+                borderRadius: BorderRadius.circular(4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _thinkingExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _thinkingExpanded ? '收起 AI 思考过程' : '查看 AI 思考过程',
+                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+              if (_thinkingExpanded)
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Text(
+                    r.reasoning!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[800],
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+            ],
 
             // Chat section toggle
             InkWell(
