@@ -60,8 +60,19 @@ class StrategyState {
 }
 
 class StrategyNotifier extends StateNotifier<StrategyState> {
-  StrategyNotifier(this.ref) : super(const StrategyState());
+  StrategyNotifier(this.ref, {QwenService Function(Ref ref)? qwenFactory})
+      // ignore: prefer_initializing_formals
+      : _qwenFactory = qwenFactory,
+        super(const StrategyState());
   final Ref ref;
+  final QwenService Function(Ref ref)? _qwenFactory;
+
+  QwenService _newQwen() {
+    final factory = _qwenFactory;
+    return factory != null
+        ? factory(ref)
+        : QwenService(ref.read(settingsProvider));
+  }
 
   /// Loads existing references from cache; if none, runs Phase 1 generation.
   Future<void> loadOrGenerate(String taskId) async {
@@ -161,6 +172,60 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     final task = notifier.taskById(taskId);
     if (task == null) return;
     await _generate(taskId, task.rubric, settings, task);
+  }
+
+  /// Retry generation for a single question — replaces the cached
+  /// reference for that questionNumber with a fresh one from the VLM.
+  Future<void> retryGenerate(String taskId, int questionNumber) async {
+    final settings = ref.read(settingsProvider);
+    if (!settings.isConfigured) {
+      state = state.copyWith(error: '未配置 API Key，请先到设置填写');
+      return;
+    }
+    final task = ref.read(taskProvider.notifier).taskById(taskId);
+    if (task == null) return;
+    final rubricItem = task.rubric.firstWhere(
+      (r) => r.questionNumber == questionNumber,
+      orElse: () => RubricItem(questionNumber: questionNumber, type: 'subjective', maxPoints: 0),
+    );
+    state = state.copyWith(refining: true, refiningQuestion: questionNumber);
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId / q:$questionNumber',
+      message: 'retryGenerate 开始',
+    );
+    try {
+      final updated = await _newQwen().generateStrategy(
+        rubricItem: rubricItem,
+        questionPaperPaths: task.questionPaperPaths,
+        answerImagePaths: task.answerImagePaths,
+        totalQuestions: task.rubric.length,
+      );
+      final newRefs = [
+        for (final r in state.references)
+          if (r.questionNumber == questionNumber) updated else r,
+      ];
+      state = state.copyWith(
+        refining: false,
+        refiningQuestion: null,
+        references: newRefs,
+      );
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId / q:$questionNumber',
+        message: 'retryGenerate 完成',
+      );
+    } catch (e) {
+      state = state.copyWith(
+        refining: false,
+        refiningQuestion: null,
+        error: ErrorFormatter.format(e),
+      );
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId / q:$questionNumber',
+        message: 'retryGenerate 失败',
+        level: EventLevel.error,
+        data: {'error': e.toString()},
+      );
+    }
   }
 
   /// Send a refinement message for a specific question.
@@ -348,6 +413,12 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
 }
 
+/// Test seam: override this provider in tests to inject a fake [QwenService].
+/// Production code resolves to `null` and the notifier falls back to
+/// constructing `QwenService(ref.read(settingsProvider))`.
+final qwenFactoryProvider = Provider<QwenService Function(Ref ref)?>((ref) => null);
+
 final strategyProvider =
-    StateNotifierProvider.autoDispose<StrategyNotifier, StrategyState>(
-        (ref) => StrategyNotifier(ref));
+    StateNotifierProvider.autoDispose<StrategyNotifier, StrategyState>((ref) {
+  return StrategyNotifier(ref, qwenFactory: ref.read(qwenFactoryProvider));
+});

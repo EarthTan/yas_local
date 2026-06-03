@@ -4,9 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/checkpoint.dart';
 import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/models/rubric.dart';
+import 'package:yas_local/models/settings.dart';
 import 'package:yas_local/models/task.dart';
+import 'package:yas_local/providers/settings_provider.dart';
 import 'package:yas_local/providers/strategy_provider.dart';
 import 'package:yas_local/providers/task_provider.dart';
+import 'package:yas_local/services/qwen_service.dart';
 
 GradingTask _taskWithRubric(List<RubricItem> rubric) => GradingTask(
       id: 't1',
@@ -22,6 +25,25 @@ class _FakeTaskNotifier extends TaskNotifier {
   final GradingTask _task;
   @override
   GradingTask? taskById(String id) => _task;
+}
+
+class _ThrowingQwenService extends QwenService {
+  _ThrowingQwenService() : super(const AppSettings(apiKey: 'k'));
+  @override
+  Future<ReferenceAnswer> generateStrategy({
+    required RubricItem rubricItem,
+    required List<String> questionPaperPaths,
+    required List<String> answerImagePaths,
+    int totalQuestions = 0,
+  }) async {
+    throw Exception('boom');
+  }
+}
+
+class _FakeUnconfiguredSettingsNotifier extends SettingsNotifier {
+  _FakeUnconfiguredSettingsNotifier() {
+    state = const AppSettings();
+  }
 }
 
 ProviderContainer _container(GradingTask task) {
@@ -103,6 +125,57 @@ void main() {
       final after = notifier.state.references.single.checkpoints;
       expect(after.length, 1);
       expect(after.single.id, 'q1-cp1');
+    });
+  });
+
+  group('StrategyNotifier retryGenerate', () {
+    Future<void> drainAndDispose(ProviderContainer container) async {
+      // Drain pending microtasks so the SettingsNotifier's _load() Future
+      // (started in the parent's constructor) completes before we dispose.
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      container.dispose();
+    }
+
+    test('未配置 settings 时写入 state.error 且不动 references', () {
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+      final container = ProviderContainer(overrides: [
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        settingsProvider.overrideWith((ref) => _FakeUnconfiguredSettingsNotifier()),
+      ]);
+      addTearDown(() => drainAndDispose(container));
+      final notifier = container.read(strategyProvider.notifier);
+      notifier.state = const StrategyState();
+
+      notifier.retryGenerate('t1', 1);
+
+      expect(notifier.state.error, contains('未配置'));
+    });
+
+    test('重试失败时 state.error 被设置、refining 清空', () async {
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+      final container = ProviderContainer(overrides: [
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        qwenFactoryProvider.overrideWithValue((ref) => _ThrowingQwenService()),
+      ]);
+      addTearDown(() => drainAndDispose(container));
+      final notifier = container.read(strategyProvider.notifier);
+      notifier.state = StrategyState(
+        references: [
+          ReferenceAnswer(questionNumber: 1, checkpoints: const [], hasConsensus: false),
+        ],
+      );
+
+      await notifier.retryGenerate('t1', 1);
+
+      expect(notifier.state.refining, false);
+      expect(notifier.state.refiningQuestion, isNull);
+      expect(notifier.state.error, isNotNull);
     });
   });
 }
