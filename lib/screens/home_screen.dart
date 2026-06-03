@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../providers/task_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/task_provider.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -15,6 +15,12 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('YAS 批改助手'),
         actions: [
+          if (ref.watch(settingsProvider).debugMode)
+            IconButton(
+              icon: const Icon(Icons.bug_report),
+              tooltip: 'Debug',
+              onPressed: () => context.push('/debug'),
+            ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () => context.push('/settings'),
