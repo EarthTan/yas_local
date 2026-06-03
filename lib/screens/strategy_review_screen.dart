@@ -12,6 +12,23 @@ import 'strategy_review/edit_checkpoint_sheet.dart';
 import 'strategy_review/progress_dots.dart';
 import 'strategy_review/question_page.dart';
 
+/// The integration point of the strategy review flow (Phase 1 of grading).
+///
+/// Composes three sibling widgets: [ProgressDots] (header) → [PageView] of
+/// [QuestionPage] (body, one rubric item per page) → [BottomActionBar]
+/// (footer, refine / confirm / next).
+///
+/// Owns the [PageController] and the current-page index, and translates user
+/// gestures (tap checkpoint, add, retry, confirm) into calls on the
+/// [strategyProvider] notifier — sibling widgets stay purely presentational.
+///
+/// Renders one of three loading states before the page list is ready:
+/// `generating` (spinner + per-question progress), `error + empty refs`
+/// (red error block with a regenerate button), and `refs.isEmpty` (spinner).
+///
+/// When every reference is confirmed, an extra "完成" button appears under
+/// the action bar; tapping it calls [StrategyNotifier.saveAllConfirmed] and
+/// pops back to the task hub (`/tasks/:id`).
 class StrategyReviewScreen extends ConsumerStatefulWidget {
   final String taskId;
   const StrategyReviewScreen({super.key, required this.taskId});

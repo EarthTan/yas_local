@@ -16,9 +16,10 @@ import 'package:yas_local/screens/strategy_review/edit_checkpoint_sheet.dart';
 import 'package:yas_local/screens/strategy_review/progress_dots.dart';
 import 'package:yas_local/screens/strategy_review/question_page.dart';
 import 'package:yas_local/screens/strategy_review_screen.dart';
+import 'package:yas_local/services/qwen_service.dart';
 
 class _SeededNotifier extends StrategyNotifier {
-  _SeededNotifier(super.ref, this._refs) {
+  _SeededNotifier(super.ref, this._refs, {super.qwenFactory}) {
     state = StrategyState(references: _refs);
   }
   final List<ReferenceAnswer> _refs;
@@ -53,10 +54,27 @@ class _FakeScreenSettingsNotifier extends SettingsNotifier {
   }
 }
 
+/// Fake [QwenService] that short-circuits [generateStrategy] to return a
+/// pre-seeded [ReferenceAnswer], so retry tests don't hit the network.
+class _FakeQwenService extends QwenService {
+  _FakeQwenService(this._next) : super(const AppSettings(apiKey: 'k'));
+  final ReferenceAnswer _next;
+
+  @override
+  Future<ReferenceAnswer> generateStrategy({
+    required RubricItem rubricItem,
+    required List<String> questionPaperPaths,
+    required List<String> answerImagePaths,
+    int totalQuestions = 0,
+  }) async =>
+      _next;
+}
+
 Future<void> _pumpScreen(
   WidgetTester tester, {
   required List<ReferenceAnswer> refs,
   required GradingTask task,
+  QwenService Function(Ref ref)? qwenFactory,
 }) async {
   final router = GoRouter(
     initialLocation: '/tasks/t1/strategy',
@@ -74,7 +92,9 @@ Future<void> _pumpScreen(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        strategyProvider.overrideWith((ref) => _SeededNotifier(ref, refs)),
+        strategyProvider.overrideWith(
+          (ref) => _SeededNotifier(ref, refs, qwenFactory: qwenFactory),
+        ),
         taskProvider.overrideWith((ref) => _FakeScreenTaskNotifier(ref, task)),
         settingsProvider.overrideWith((ref) => _FakeScreenSettingsNotifier()),
       ],
@@ -528,6 +548,112 @@ void main() {
       await tester.tap(allDots.at(2));
       await tester.pumpAndSettle();
       expect(find.text('第 3 题'), findsOneWidget);
+    });
+
+    testWidgets('点击 checkpoint 打开 EditCheckpointSheet', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 3),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      // Find the checkpoint row via the InkWell ancestor of the description text.
+      final row = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(find.byType(EditCheckpointSheet), findsOneWidget);
+    });
+
+    testWidgets('Edit sheet 保存 更新 description 并关闭 sheet', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 3),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      // Open the edit sheet.
+      final row = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      // Modify the description in the sheet.
+      await tester.enterText(find.byType(TextField).first, '新描述');
+      await tester.pump();
+      // Tap 保存.
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+      // Sheet should be gone; the new description should appear on the page.
+      expect(find.byType(EditCheckpointSheet), findsNothing);
+      expect(find.text('新描述'), findsOneWidget);
+      expect(find.text('答对'), findsNothing);
+    });
+
+    testWidgets('点击「添加得分点」并保存，checkpoint 数量 +1 且显示新描述', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      // Tap 「添加得分点」.
+      await tester.tap(find.widgetWithText(OutlinedButton, '添加得分点'));
+      await tester.pumpAndSettle();
+      // The add sheet should be open with an empty description.
+      expect(find.byType(EditCheckpointSheet), findsOneWidget);
+      // Fill the description and save.
+      await tester.enterText(find.byType(TextField).first, '新加的');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+      // Sheet gone, new description visible alongside the original.
+      expect(find.byType(EditCheckpointSheet), findsNothing);
+      expect(find.text('新加的'), findsOneWidget);
+      expect(find.text('答对'), findsOneWidget);
+    });
+
+    testWidgets('失败题 点重试 后 checkpoints 被新生成结果替换', (tester) async {
+      final refs = [
+        // Failed: empty checkpoints.
+        const ReferenceAnswer(questionNumber: 1, checkpoints: []),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+
+      // Fake QwenService — its generateStrategy returns a successful reference
+      // with non-empty checkpoints, simulating a successful retry.
+      const replacement = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: [CheckpointDef(id: 'q1-cp0', description: '新策略', points: 5)],
+      );
+      final fakeQwen = _FakeQwenService(replacement);
+
+      await _pumpScreen(
+        tester,
+        refs: refs,
+        task: task,
+        qwenFactory: (_) => fakeQwen,
+      );
+      // Failure banner + retry button visible.
+      expect(find.text('该题生成失败'), findsOneWidget);
+      expect(find.text('重试此题'), findsOneWidget);
+      // Tap retry.
+      await tester.tap(find.widgetWithText(FilledButton, '重试此题'));
+      await tester.pumpAndSettle();
+      // Replacement checkpoint should now be on the page.
+      expect(find.text('该题生成失败'), findsNothing);
+      expect(find.text('新策略'), findsOneWidget);
     });
   });
 }
