@@ -104,3 +104,125 @@ class StateSnapshot {
     required this.capturedAt,
   });
 }
+
+class DebugService {
+  DebugService._();
+  static final DebugService instance = DebugService._();
+
+  static const int qwenCapacity = 200;
+  static const int eventCapacity = 1000;
+  static const int jsonAttemptCapacity = 200;
+
+  bool _enabled = false;
+  bool get enabled => _enabled;
+
+  final List<QwenCallRecord> _qwenCalls = <QwenCallRecord>[];
+  final List<EventRecord> _events = <EventRecord>[];
+  final List<JsonAttemptRecord> _jsonAttempts = <JsonAttemptRecord>[];
+  StateSnapshot? _stateSnapshot;
+
+  List<QwenCallRecord> get qwenCalls => List.unmodifiable(_qwenCalls);
+  List<EventRecord> get events => List.unmodifiable(_events);
+  List<JsonAttemptRecord> get jsonAttempts => List.unmodifiable(_jsonAttempts);
+  StateSnapshot? get stateSnapshot => _stateSnapshot;
+
+  void setEnabled(bool value) {
+    _enabled = value;
+  }
+
+  void recordQwenCall(QwenCallRecord record) {
+    if (!_enabled) return;
+    _qwenCalls.add(record);
+    if (_qwenCalls.length > qwenCapacity) {
+      _qwenCalls.removeAt(0);
+    }
+  }
+
+  void recordEvent({
+    required String scope,
+    required String message,
+    EventLevel level = EventLevel.info,
+    Map<String, Object?>? data,
+  }) {
+    if (!_enabled) return;
+    _events.add(EventRecord(
+      timestamp: DateTime.now(),
+      scope: scope,
+      level: level,
+      message: message,
+      data: data,
+    ));
+    if (_events.length > eventCapacity) {
+      _events.removeAt(0);
+    }
+  }
+
+  void recordJsonAttempt(JsonAttemptRecord record) {
+    if (!_enabled) return;
+    _jsonAttempts.add(record);
+    if (_jsonAttempts.length > jsonAttemptCapacity) {
+      _jsonAttempts.removeAt(0);
+    }
+  }
+
+  void refreshStateSnapshot({
+    required List<dynamic> tasks,
+    required List<dynamic> references,
+    required dynamic settings,
+  }) {
+    // Snapshot refresh is intentionally NOT gated on enabled.
+    // Cost is one assignment; benefit is "open debug → see current state immediately".
+    _stateSnapshot = StateSnapshot(
+      tasks: tasks,
+      references: references,
+      settings: settings,
+      capturedAt: DateTime.now(),
+    );
+  }
+
+  void clear() {
+    _qwenCalls.clear();
+    _events.clear();
+    _jsonAttempts.clear();
+    _stateSnapshot = null;
+  }
+
+  /// Test-only helper. Resets the enabled flag and clears all ring buffers +
+  /// the state snapshot. Production code must use [setEnabled] / [clear].
+  void resetForTest() {
+    _enabled = false;
+    clear();
+  }
+}
+
+/// Builder for [JsonAttemptRecord]. Used inside `JsonExtractor` to record
+/// each parsing attempt as it happens, then commit a single record on exit.
+class JsonAttemptBuilder {
+  JsonAttemptBuilder({required this.scope, required this.input})
+      : timestamp = DateTime.now();
+
+  final DateTime timestamp;
+  final String scope;
+  final String input;
+  final List<JsonAttempt> _attempts = <JsonAttempt>[];
+  String? _finalException;
+
+  void record(String method, {required bool ok, String? error}) {
+    _attempts.add(JsonAttempt(method: method, ok: ok, error: error));
+  }
+
+  void markFailed(String exception) {
+    _finalException = exception;
+  }
+
+  void commit() {
+    final snippet = input.length > 200 ? input.substring(0, 200) : input;
+    DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+      timestamp: timestamp,
+      scope: scope,
+      inputSnippet: snippet,
+      attempts: List.unmodifiable(_attempts),
+      finalException: _finalException,
+    ));
+  }
+}
