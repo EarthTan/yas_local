@@ -84,4 +84,29 @@ void main() {
     // The card title contains the elapsed time
     expect(find.textContaining('1234ms'), findsOneWidget);
   });
+
+  testWidgets('Qwen tab auto-rerenders when a new call is recorded after mount',
+      (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(home: DebugScreen()),
+      ),
+    );
+    expect(find.text('暂无 Qwen 调用记录'), findsOneWidget);
+
+    // Record a call after the screen is mounted — no manual refresh allowed.
+    DebugService.instance.recordQwenCall(QwenCallRecord(
+      timestamp: DateTime.now(),
+      scope: 'grade',
+      model: 'qwen-vl-max',
+      endpoint: '/chat/completions',
+      statusCode: 200,
+      elapsedMs: 5678,
+      status: QwenCallStatus.ok,
+      messages: const [],
+    ));
+    await tester.pump();
+    expect(find.text('暂无 Qwen 调用记录'), findsNothing);
+    expect(find.textContaining('5678ms'), findsOneWidget);
+  });
 }

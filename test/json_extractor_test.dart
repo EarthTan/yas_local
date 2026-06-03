@@ -3,6 +3,51 @@ import 'package:yas_local/services/debug_service.dart';
 import 'package:yas_local/services/json_extractor.dart';
 
 void main() {
+  setUp(() {
+    DebugService.instance.resetForTest();
+    DebugService.instance.setEnabled(true);
+  });
+
+  group('scope propagation', () {
+    test('requireObject defaults scope to "caller" when not specified', () {
+      JsonExtractor.requireObject('{"a": 1}');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
+    });
+
+    test('requireObject records the scope passed in', () {
+      JsonExtractor.requireObject('{"a": 1}', scope: 'strategy');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
+    });
+
+    test('requireList defaults scope to "caller" when not specified', () {
+      JsonExtractor.requireList('[1, 2]');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
+    });
+
+    test('requireList records the scope passed in', () {
+      JsonExtractor.requireList('[1, 2]', scope: 'grade');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'grade');
+    });
+
+    test('requireObjectWithReasoning threads scope to the underlying require', () {
+      JsonExtractor.requireObjectWithReasoning('{"a": 1}', scope: 'refine');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'refine');
+    });
+
+    test('requireListWithReasoning threads scope to the underlying require', () {
+      JsonExtractor.requireListWithReasoning('[1]', fromKey: null, scope: 'identify');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'identify');
+    });
+
+    test('failed extraction also records the scope', () {
+      expect(
+        () => JsonExtractor.requireObject('not json at all', scope: 'strategy'),
+        throwsA(isA<JsonParseException>()),
+      );
+      expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
+    });
+  });
+
   // ── requireObject ──────────────────────────────────────────────────────────
 
   group('JsonExtractor.requireObject', () {

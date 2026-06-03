@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Status of a Qwen HTTP call as observed by DebugService.
 enum QwenCallStatus {
   /// HTTP 2xx, response received and parsed successfully.
@@ -105,8 +107,16 @@ class StateSnapshot {
   });
 }
 
+/// Thin [ChangeNotifier] wrapper that exposes `notify()` publicly, so the
+/// owning [DebugService] (which is not a [ChangeNotifier] subclass) can
+/// fire updates without tripping the protected-`notifyListeners` lint.
+class _DebugNotifier extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
 class DebugService {
   DebugService._();
+
   static final DebugService instance = DebugService._();
 
   static const int qwenCapacity = 200;
@@ -115,6 +125,16 @@ class DebugService {
 
   bool _enabled = false;
   bool get enabled => _enabled;
+
+  /// Fires whenever a record is appended to one of the ring buffers.
+  /// `refreshStateSnapshot` does NOT fire this — callers can decide themselves
+  /// whether they want to subscribe to snapshot changes (they typically read
+  /// it in lockstep with the buffers).
+  ///
+  /// Non-final so [resetForTest] can swap in a fresh instance between tests
+  /// without leaking listeners from the previous test.
+  _DebugNotifier _changes = _DebugNotifier();
+  Listenable get changes => _changes;
 
   final List<QwenCallRecord> _qwenCalls = <QwenCallRecord>[];
   final List<EventRecord> _events = <EventRecord>[];
@@ -136,6 +156,7 @@ class DebugService {
     if (_qwenCalls.length > qwenCapacity) {
       _qwenCalls.removeAt(0);
     }
+    _changes.notify();
   }
 
   void recordEvent({
@@ -155,6 +176,7 @@ class DebugService {
     if (_events.length > eventCapacity) {
       _events.removeAt(0);
     }
+    _changes.notify();
   }
 
   void recordJsonAttempt(JsonAttemptRecord record) {
@@ -163,6 +185,7 @@ class DebugService {
     if (_jsonAttempts.length > jsonAttemptCapacity) {
       _jsonAttempts.removeAt(0);
     }
+    _changes.notify();
   }
 
   void refreshStateSnapshot({
@@ -187,10 +210,14 @@ class DebugService {
     _stateSnapshot = null;
   }
 
-  /// Test-only helper. Resets the enabled flag and clears all ring buffers +
-  /// the state snapshot. Production code must use [setEnabled] / [clear].
+  /// Test-only helper. Resets the enabled flag, clears all ring buffers +
+  /// the state snapshot, and swaps in a fresh [ChangeNotifier] so listeners
+  /// from the previous test don't leak into the next one. Production code
+  /// must use [setEnabled] / [clear].
   void resetForTest() {
     _enabled = false;
+    _changes.dispose();
+    _changes = _DebugNotifier();
     clear();
   }
 }

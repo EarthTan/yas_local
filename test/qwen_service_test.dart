@@ -112,4 +112,69 @@ void main() {
     expect(calls.last.status, QwenCallStatus.parseError);
     expect(calls.last.errorMessage, contains('JsonParseException'));
   });
+
+  group('redactBase64Messages', () {
+    test('replaces data: URLs with [redacted] placeholder, preserving mime type', () {
+      final out = QwenService.redactBase64Messages([
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'image_url',
+              'image_url': {'url': 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAA'},
+            },
+            {
+              'type': 'text',
+              'text': 'hello',
+            },
+          ],
+        },
+      ]);
+      final content = out.single['content'] as List;
+      final imageUrl = (content[0]['image_url'] as Map)['url'] as String;
+      expect(imageUrl, 'data:image/jpeg;base64,[redacted]');
+      // Text content should pass through untouched.
+      expect(content[1]['text'], 'hello');
+    });
+
+    test('passes through plain text messages unchanged', () {
+      final out = QwenService.redactBase64Messages([
+        {'role': 'user', 'content': 'just a string'},
+      ]);
+      expect(out.single['content'], 'just a string');
+    });
+
+    test('does not mutate the input list', () {
+      final original = [
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'image_url',
+              'image_url': {'url': 'data:image/png;base64,AAAA'},
+            },
+          ],
+        },
+      ];
+      QwenService.redactBase64Messages(original);
+      // The original list's nested url must still be the long base64 string.
+      final url = ((original[0]['content'] as List)[0]['image_url'] as Map)['url'] as String;
+      expect(url, 'data:image/png;base64,AAAA');
+    });
+
+    test('preserves non-image_url content (audio, file, etc.)', () {
+      // If we add audio_url later, it should also be redacted. For now only
+      // image_url is supported, and other types should be passed through.
+      final input = [
+        {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': 'q'},
+          ],
+        },
+      ];
+      final out = QwenService.redactBase64Messages(input);
+      expect((out[0]['content'] as List).single['type'], 'text');
+    });
+  });
 }

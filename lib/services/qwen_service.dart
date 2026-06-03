@@ -64,7 +64,7 @@ class QwenService {
             statusCode: response.statusCode,
             elapsedMs: elapsed,
             status: QwenCallStatus.ok,
-            messages: messages,
+            messages: redactBase64Messages(messages),
             responseContent: content,
             reasoningContent: reasoning,
           ));
@@ -83,7 +83,7 @@ class QwenService {
           statusCode: e.response?.statusCode,
           elapsedMs: elapsed,
           status: QwenCallStatus.httpError,
-          messages: messages ?? const [],
+          messages: messages == null ? const [] : redactBase64Messages(messages),
           errorMessage: e.message ?? '',
         ));
         handler.next(e);
@@ -103,6 +103,46 @@ class QwenService {
       }
     }
     return url;
+  }
+
+  /// Returns a deep-copied [messages] list with any base64 image payloads
+  /// replaced by `[redacted]`. The debug screen surfaces these messages to
+  /// the teacher, so the raw image bytes must never be stored — they may
+  /// contain student handwriting that we don't want to persist in clear text.
+  ///
+  /// Only `image_url` entries with `data:` URLs are redacted. HTTP(S) URLs
+  /// (rare in this app — we always inline-encode local files) are passed
+  /// through unchanged.
+  static List<Map<String, dynamic>> redactBase64Messages(
+      List<Map<String, dynamic>> messages) {
+    return messages.map((m) {
+      final content = m['content'];
+      if (content is! List) return m; // text-only message: untouched
+      return <String, dynamic>{
+        ...m,
+        'content': content.map((part) {
+          if (part is! Map) return part;
+          final type = part['type'];
+          if (type != 'image_url') return part;
+          final imageUrl = part['image_url'];
+          if (imageUrl is! Map) return part;
+          final url = imageUrl['url'];
+          if (url is! String || !url.startsWith('data:')) return part;
+          // Preserve everything before the comma (the "data:<mime>;base64,"
+          // prefix) so the debug screen can still show what kind of image
+          // was sent, then replace the payload.
+          final commaIdx = url.indexOf(',');
+          final prefix = commaIdx == -1 ? url : url.substring(0, commaIdx);
+          return <String, dynamic>{
+            ...part,
+            'image_url': <String, dynamic>{
+              ...imageUrl,
+              'url': '$prefix,[redacted]',
+            },
+          };
+        }).toList(),
+      };
+    }).toList();
   }
 
   Future<ReferenceAnswer> generateStrategy({
@@ -162,7 +202,7 @@ class QwenService {
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
     try {
-      final payload = JsonExtractor.requireObjectWithReasoning(content);
+      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'strategy');
       return _parseReferenceAnswer(
         rubricItem.questionNumber,
         payload.json,
@@ -224,7 +264,7 @@ class QwenService {
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
     try {
-      final payload = JsonExtractor.requireObjectWithReasoning(content);
+      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
       return _parseReferenceAnswer(
         current.questionNumber,
         payload.json,
@@ -239,7 +279,7 @@ class QwenService {
         statusCode: resp.statusCode,
         elapsedMs: 0,
         status: QwenCallStatus.parseError,
-        messages: messages, // one-shot chat, useful to see what we sent
+        messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
         errorMessage: e.toString(),
       ));
       rethrow;
@@ -282,7 +322,8 @@ class QwenService {
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
     try {
-      final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+      final payload = JsonExtractor.requireListWithReasoning(content,
+          fromKey: 'questions', scope: 'identify');
       // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
       return payload.list
           .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
@@ -359,7 +400,8 @@ class QwenService {
     );
     final content = resp.data['choices'][0]['message']['content'] as String;
     try {
-      final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
+      final payload = JsonExtractor.requireListWithReasoning(content,
+          fromKey: 'questions', scope: 'grade');
       // reasoning 丢弃：批改的思考过程不暴露给学生/老师
       return payload.list.map((q) {
         final qNum = q['number'] is int

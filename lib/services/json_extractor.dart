@@ -50,9 +50,12 @@ class JsonExtractor {
 
   /// Returns the first valid JSON object found in [text].
   ///
+  /// [scope] is recorded in the debug log so the teacher can see whether
+  /// a given parse failure came from strategy, identify, grade, etc.
+  ///
   /// Throws [JsonParseException] if no object can be extracted.
-  static Map<String, dynamic> requireObject(String text) {
-    final builder = JsonAttemptBuilder(scope: 'caller', input: text);
+  static Map<String, dynamic> requireObject(String text, {String scope = 'caller'}) {
+    final builder = JsonAttemptBuilder(scope: scope, input: text);
     try {
       final cleaned = _stripThinking(text);
       builder.record('strip_thinking', ok: true);
@@ -98,9 +101,12 @@ class JsonExtractor {
   /// 1. Parse as object and return `candidate[fromKey]` if it is a [List].
   /// 2. Parse as a bare list.
   ///
+  /// [scope] is recorded in the debug log (see [requireObject]).
+  ///
   /// Throws [JsonParseException] if no list can be extracted.
-  static List<dynamic> requireList(String text, {String? fromKey}) {
-    final builder = JsonAttemptBuilder(scope: 'caller', input: text);
+  static List<dynamic> requireList(String text,
+      {String? fromKey, String scope = 'caller'}) {
+    final builder = JsonAttemptBuilder(scope: scope, input: text);
     try {
       final cleaned = _stripThinking(text);
       builder.record('strip_thinking', ok: true);
@@ -170,10 +176,14 @@ class JsonExtractor {
   /// surrounding text can be in any format (raw JSON, ```json``` fenced, or
   /// mixed with prose).
   ///
+  /// [scope] is forwarded to the underlying [requireObject] (recorded in
+  /// the debug log).
+  ///
   /// Throws [JsonParseException] if no object can be extracted.
-  static ExtractionResult requireObjectWithReasoning(String text) {
+  static ExtractionResult requireObjectWithReasoning(String text,
+      {String scope = 'caller'}) {
     final (reasoning, rest) = _splitReasoning(text);
-    return ExtractionResult(reasoning: reasoning, json: requireObject(rest));
+    return ExtractionResult(reasoning: reasoning, json: requireObject(rest, scope: scope));
   }
 
   /// List counterpart of [requireObjectWithReasoning]. See that method for
@@ -183,11 +193,12 @@ class JsonExtractor {
   static ExtractionListResult requireListWithReasoning(
     String text, {
     String? fromKey,
+    String scope = 'caller',
   }) {
     final (reasoning, rest) = _splitReasoning(text);
     return ExtractionListResult(
       reasoning: reasoning,
-      list: requireList(rest, fromKey: fromKey),
+      list: requireList(rest, fromKey: fromKey, scope: scope),
     );
   }
 

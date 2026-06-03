@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/services/debug_service.dart';
 
@@ -175,6 +176,59 @@ void main() {
       expect(DebugService.instance.events, isEmpty);
       expect(DebugService.instance.stateSnapshot, isNull);
       expect(DebugService.instance.enabled, isTrue); // clear() must not touch _enabled
+    });
+  });
+
+  group('changes Listenable', () {
+    setUp(() {
+      DebugService.instance.setEnabled(true);
+    });
+
+    test('changes is a Listenable', () {
+      expect(DebugService.instance.changes, isA<Listenable>());
+    });
+
+    test('notifies listeners on recordQwenCall', () {
+      var notified = 0;
+      DebugService.instance.changes.addListener(() => notified++);
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'identify',
+        model: 'm',
+        endpoint: '/chat/completions',
+        statusCode: 200,
+        elapsedMs: 1,
+        status: QwenCallStatus.ok,
+        messages: const [],
+      ));
+      expect(notified, 1);
+    });
+
+    test('notifies listeners on recordEvent', () {
+      var notified = 0;
+      DebugService.instance.changes.addListener(() => notified++);
+      DebugService.instance.recordEvent(scope: 's', message: 'm');
+      expect(notified, 1);
+    });
+
+    test('notifies listeners on recordJsonAttempt', () {
+      var notified = 0;
+      DebugService.instance.changes.addListener(() => notified++);
+      DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+        timestamp: DateTime.now(),
+        scope: 'identify',
+        inputSnippet: 'x',
+        attempts: const [],
+      ));
+      expect(notified, 1);
+    });
+
+    test('does not notify when disabled (recordX is no-op)', () {
+      DebugService.instance.setEnabled(false);
+      var notified = 0;
+      DebugService.instance.changes.addListener(() => notified++);
+      DebugService.instance.recordEvent(scope: 's', message: 'm');
+      expect(notified, 0);
     });
   });
 
