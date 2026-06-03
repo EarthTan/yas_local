@@ -177,4 +177,34 @@ void main() {
       expect(DebugService.instance.enabled, isTrue); // clear() must not touch _enabled
     });
   });
+
+  group('JsonAttemptBuilder', () {
+    setUp(() {
+      DebugService.instance.setEnabled(true);
+    });
+
+    test('commit records attempts and finalException', () {
+      final b = JsonAttemptBuilder(scope: 'identify', input: 'a' * 500);
+      b.record('strip_thinking', ok: true);
+      b.record('fence_object', ok: false, error: 'parse failed');
+      b.markFailed('JsonParseException: no object');
+      b.commit();
+
+      final r = DebugService.instance.jsonAttempts.single;
+      expect(r.scope, 'identify');
+      expect(r.attempts, hasLength(2));
+      expect(r.attempts[1].ok, isFalse);
+      expect(r.attempts[1].error, 'parse failed');
+      expect(r.finalException, 'JsonParseException: no object');
+      expect(r.inputSnippet, hasLength(200)); // truncated
+    });
+
+    test('commit is no-op when service disabled', () {
+      DebugService.instance.setEnabled(false);
+      final b = JsonAttemptBuilder(scope: 'identify', input: 'x');
+      b.record('strip_thinking', ok: true);
+      b.commit();
+      expect(DebugService.instance.jsonAttempts, isEmpty);
+    });
+  });
 }
