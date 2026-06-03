@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/services/debug_service.dart';
 import 'package:yas_local/services/json_extractor.dart';
 
 void main() {
@@ -239,6 +240,32 @@ void main() {
       final payload = JsonExtractor.requireListWithReasoning(text, fromKey: 'questions');
       expect(payload.reasoning, '先看题');
       expect(payload.list.first['n'], 1);
+    });
+  });
+
+  // ── DebugService instrumentation ───────────────────────────────────────────
+
+  group('DebugService instrumentation', () {
+    setUp(() {
+      DebugService.instance.resetForTest();
+      DebugService.instance.setEnabled(true);
+    });
+
+    test('successful extraction records an attempt', () {
+      JsonExtractor.requireObject('{"a": 1}');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
+    });
+
+    test('failed extraction records attempts including the failing branch and finalException', () {
+      try {
+        JsonExtractor.requireObject('this is not json');
+      } catch (_) {}
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      expect(r.attempts.where((a) => a.ok), isNotEmpty); // strip_thinking succeeded
+      expect(r.attempts.where((a) => !a.ok), isNotEmpty); // braces_object failed
+      expect(r.finalException, isNotNull);
     });
   });
 }
