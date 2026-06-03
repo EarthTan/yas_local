@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'debug_service.dart';
+
 /// Thrown when AI response text cannot be parsed into the expected JSON shape.
 class JsonParseException implements Exception {
   final String message;
@@ -48,22 +50,49 @@ class JsonExtractor {
 
   /// Returns the first valid JSON object found in [text].
   ///
+  /// [scope] is recorded in the debug log so the teacher can see whether
+  /// a given parse failure came from strategy, identify, grade, etc.
+  ///
   /// Throws [JsonParseException] if no object can be extracted.
-  static Map<String, dynamic> requireObject(String text) {
-    final cleaned = _stripThinking(text);
+  static Map<String, dynamic> requireObject(String text, {String scope = 'caller'}) {
+    final builder = JsonAttemptBuilder(scope: scope, input: text);
+    try {
+      final cleaned = _stripThinking(text);
+      builder.record('strip_thinking', ok: true);
 
-    for (final block in _codeFenceContents(cleaned)) {
-      final result = _tryObject(block);
-      if (result != null) return result;
+      for (final block in _codeFenceContents(cleaned)) {
+        final result = _tryObject(block);
+        if (result != null) {
+          builder.record('fence_object', ok: true);
+          builder.commit();
+          return result;
+        }
+        builder.record('fence_object', ok: false, error: 'parse failed');
+      }
+
+      final result = _tryObject(cleaned);
+      if (result != null) {
+        builder.record('braces_object', ok: true);
+        builder.commit();
+        return result;
+      }
+
+      builder.record('braces_object', ok: false, error: 'no { found');
+      builder.markFailed('JsonParseException: no object found');
+      builder.commit();
+      throw JsonParseException(
+        'No valid JSON object found in AI response.',
+        rawContent: text,
+      );
+    } catch (e) {
+      if (e is! JsonParseException) {
+        builder.markFailed(e.toString());
+        builder.commit();
+      } else {
+        // Already marked above
+      }
+      rethrow;
     }
-
-    final result = _tryObject(cleaned);
-    if (result != null) return result;
-
-    throw JsonParseException(
-      'No valid JSON object found in AI response.',
-      rawContent: text,
-    );
   }
 
   /// Returns the first valid JSON list found in [text].
@@ -72,26 +101,71 @@ class JsonExtractor {
   /// 1. Parse as object and return `candidate[fromKey]` if it is a [List].
   /// 2. Parse as a bare list.
   ///
+  /// [scope] is recorded in the debug log (see [requireObject]).
+  ///
   /// Throws [JsonParseException] if no list can be extracted.
-  static List<dynamic> requireList(String text, {String? fromKey}) {
-    final cleaned = _stripThinking(text);
-    final candidates = [..._codeFenceContents(cleaned), cleaned];
+  static List<dynamic> requireList(String text,
+      {String? fromKey, String scope = 'caller'}) {
+    final builder = JsonAttemptBuilder(scope: scope, input: text);
+    try {
+      final cleaned = _stripThinking(text);
+      builder.record('strip_thinking', ok: true);
 
-    for (final candidate in candidates) {
+      for (final block in _codeFenceContents(cleaned)) {
+        if (fromKey != null) {
+          final obj = _tryObject(block);
+          if (obj != null && obj[fromKey] is List) {
+            builder.record('fence_object_with_fromKey', ok: true);
+            builder.commit();
+            return obj[fromKey] as List<dynamic>;
+          }
+          if (obj != null) {
+            builder.record('fence_object_with_fromKey',
+                ok: false, error: 'key missing or not a list');
+          }
+        }
+        final list = _tryList(block);
+        if (list != null) {
+          builder.record('fence_list', ok: true);
+          builder.commit();
+          return list;
+        }
+        builder.record('fence_list', ok: false, error: 'parse failed');
+      }
+
       if (fromKey != null) {
-        final obj = _tryObject(candidate);
+        final obj = _tryObject(cleaned);
         if (obj != null && obj[fromKey] is List) {
+          builder.record('braces_object_with_fromKey', ok: true);
+          builder.commit();
           return obj[fromKey] as List<dynamic>;
         }
+        if (obj != null) {
+          builder.record('braces_object_with_fromKey',
+              ok: false, error: 'key missing or not a list');
+        }
       }
-      final list = _tryList(candidate);
-      if (list != null) return list;
-    }
+      final result = _tryList(cleaned);
+      if (result != null) {
+        builder.record('braces_list', ok: true);
+        builder.commit();
+        return result;
+      }
 
-    throw JsonParseException(
-      'No valid JSON list found in AI response.',
-      rawContent: text,
-    );
+      builder.record('braces_list', ok: false, error: 'no [ found');
+      builder.markFailed('JsonParseException: no list found');
+      builder.commit();
+      throw JsonParseException(
+        'No valid JSON list found in AI response.',
+        rawContent: text,
+      );
+    } catch (e) {
+      if (e is! JsonParseException) {
+        builder.markFailed(e.toString());
+        builder.commit();
+      }
+      rethrow;
+    }
   }
 
   /// Returns the JSON object plus any reasoning text wrapped in
@@ -102,10 +176,14 @@ class JsonExtractor {
   /// surrounding text can be in any format (raw JSON, ```json``` fenced, or
   /// mixed with prose).
   ///
+  /// [scope] is forwarded to the underlying [requireObject] (recorded in
+  /// the debug log).
+  ///
   /// Throws [JsonParseException] if no object can be extracted.
-  static ExtractionResult requireObjectWithReasoning(String text) {
+  static ExtractionResult requireObjectWithReasoning(String text,
+      {String scope = 'caller'}) {
     final (reasoning, rest) = _splitReasoning(text);
-    return ExtractionResult(reasoning: reasoning, json: requireObject(rest));
+    return ExtractionResult(reasoning: reasoning, json: requireObject(rest, scope: scope));
   }
 
   /// List counterpart of [requireObjectWithReasoning]. See that method for
@@ -115,11 +193,12 @@ class JsonExtractor {
   static ExtractionListResult requireListWithReasoning(
     String text, {
     String? fromKey,
+    String scope = 'caller',
   }) {
     final (reasoning, rest) = _splitReasoning(text);
     return ExtractionListResult(
       reasoning: reasoning,
-      list: requireList(rest, fromKey: fromKey),
+      list: requireList(rest, fromKey: fromKey, scope: scope),
     );
   }
 

@@ -7,9 +7,9 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
+import 'debug_service.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';
-import 'qwen_logger.dart';
 
 class QuestionGradeResult {
   final int questionNumber;
@@ -30,6 +30,7 @@ class QuestionGradeResult {
 class QwenService {
   final AppSettings settings;
   final Dio _dio;
+  Dio get dio => _dio;
 
   QwenService(this.settings)
       : _dio = Dio(BaseOptions(
@@ -55,15 +56,18 @@ class QwenService {
           final content = choice['content'] as String? ?? '';
           final reasoning = choice['reasoning_content'] as String?;
           final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
-          QwenLogger.logSuccess(
+          DebugService.instance.recordQwenCall(QwenCallRecord(
+            timestamp: start ?? DateTime.now(),
+            scope: response.requestOptions.extra['_qwen_scope'] as String? ?? 'unknown',
             model: settings.vlModel,
             endpoint: response.requestOptions.path,
-            messages: messages,
-            responseContent: content,
-            reasoningContent: reasoning,
             statusCode: response.statusCode,
             elapsedMs: elapsed,
-          );
+            status: QwenCallStatus.ok,
+            messages: redactBase64Messages(messages),
+            responseContent: content,
+            reasoningContent: reasoning,
+          ));
         }
         handler.next(response);
       },
@@ -71,17 +75,17 @@ class QwenService {
         final messages = e.requestOptions.extra['_qwen_messages'] as List<Map<String, dynamic>>?;
         final start = e.requestOptions.extra['_qwen_start'] as DateTime?;
         final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
-        final summary = messages == null ? null : _summarizeRequest(messages);
-        final body = e.response?.data?.toString();
-        QwenLogger.logError(
+        DebugService.instance.recordQwenCall(QwenCallRecord(
+          timestamp: start ?? DateTime.now(),
+          scope: e.requestOptions.extra['_qwen_scope'] as String? ?? 'unknown',
+          model: settings.vlModel,
           endpoint: e.requestOptions.path,
           statusCode: e.response?.statusCode,
-          errorType: e.type.name,
-          message: e.message ?? '',
-          requestSummary: summary,
-          responseSnippet: body == null ? null : (body.length > 500 ? '${body.substring(0, 500)}…' : body),
           elapsedMs: elapsed,
-        );
+          status: QwenCallStatus.httpError,
+          messages: messages == null ? const [] : redactBase64Messages(messages),
+          errorMessage: e.message ?? '',
+        ));
         handler.next(e);
       },
     ));
@@ -99,6 +103,46 @@ class QwenService {
       }
     }
     return url;
+  }
+
+  /// Returns a deep-copied [messages] list with any base64 image payloads
+  /// replaced by `[redacted]`. The debug screen surfaces these messages to
+  /// the teacher, so the raw image bytes must never be stored — they may
+  /// contain student handwriting that we don't want to persist in clear text.
+  ///
+  /// Only `image_url` entries with `data:` URLs are redacted. HTTP(S) URLs
+  /// (rare in this app — we always inline-encode local files) are passed
+  /// through unchanged.
+  static List<Map<String, dynamic>> redactBase64Messages(
+      List<Map<String, dynamic>> messages) {
+    return messages.map((m) {
+      final content = m['content'];
+      if (content is! List) return m; // text-only message: untouched
+      return <String, dynamic>{
+        ...m,
+        'content': content.map((part) {
+          if (part is! Map) return part;
+          final type = part['type'];
+          if (type != 'image_url') return part;
+          final imageUrl = part['image_url'];
+          if (imageUrl is! Map) return part;
+          final url = imageUrl['url'];
+          if (url is! String || !url.startsWith('data:')) return part;
+          // Preserve everything before the comma (the "data:<mime>;base64,"
+          // prefix) so the debug screen can still show what kind of image
+          // was sent, then replace the payload.
+          final commaIdx = url.indexOf(',');
+          final prefix = commaIdx == -1 ? url : url.substring(0, commaIdx);
+          return <String, dynamic>{
+            ...part,
+            'image_url': <String, dynamic>{
+              ...imageUrl,
+              'url': '$prefix,[redacted]',
+            },
+          };
+        }).toList(),
+      };
+    }).toList();
   }
 
   Future<ReferenceAnswer> generateStrategy({
@@ -131,34 +175,53 @@ class QwenService {
 
     final countCtx = totalQuestions > 0 ? '（作业共有 $totalQuestions 道题）' : '';
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.generateStrategy(
-                questionNumber: rubricItem.questionNumber,
-                maxPoints: rubricItem.maxPoints,
-                questionText: rubricItem.questionText,
-                hasAnswerImages: answerImagePaths.isNotEmpty,
-                countCtx: countCtx,
-              ),
-            },
-          ],
-        }
-      ],
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireObjectWithReasoning(content);
-    return _parseReferenceAnswer(
-      rubricItem.questionNumber,
-      payload.json,
-      reasoning: payload.reasoning,
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.generateStrategy(
+                  questionNumber: rubricItem.questionNumber,
+                  maxPoints: rubricItem.maxPoints,
+                  questionText: rubricItem.questionText,
+                  hasAnswerImages: answerImagePaths.isNotEmpty,
+                  countCtx: countCtx,
+                ),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'strategy'}),
     );
+    final content = resp.data['choices'][0]['message']['content'] as String;
+    try {
+      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'strategy');
+      return _parseReferenceAnswer(
+        rubricItem.questionNumber,
+        payload.json,
+        reasoning: payload.reasoning,
+      );
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'strategy',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<ReferenceAnswer> refineStrategy({
@@ -191,17 +254,36 @@ class QwenService {
       {'role': 'user', 'content': userMessage},
     ];
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': messages,
-    });
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireObjectWithReasoning(content);
-    return _parseReferenceAnswer(
-      current.questionNumber,
-      payload.json,
-      reasoning: payload.reasoning,
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': messages,
+      },
+      options: Options(extra: {'_qwen_scope': 'refine'}),
     );
+    final content = resp.data['choices'][0]['message']['content'] as String;
+    try {
+      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
+      return _parseReferenceAnswer(
+        current.questionNumber,
+        payload.json,
+        reasoning: payload.reasoning,
+      );
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'refine',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
@@ -219,27 +301,47 @@ class QwenService {
       });
     }
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.identifyQuestions(),
-            },
-          ],
-        }
-      ],
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.identifyQuestions(),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'identify'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
-    // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
-    return payload.list
-        .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
-        .toList();
+    try {
+      final payload = JsonExtractor.requireListWithReasoning(content,
+          fromKey: 'questions', scope: 'identify');
+      // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
+      return payload.list
+          .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
+          .toList();
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'identify',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   Future<List<QuestionGradeResult>> gradePaper({
@@ -277,44 +379,64 @@ class QwenService {
       'image_url': {'url': 'data:${_mimeType(imagePath)};base64,$studentB64'},
     });
 
-    final resp = await _dio.post('/chat/completions', data: {
-      'model': settings.vlModel,
-      'messages': [
-        {
-          'role': 'user',
-          'content': [
-            ...imageContent,
-            {
-              'type': 'text',
-              'text': AppPrompts.gradePaper(strategyText: strategyText),
-            },
-          ],
-        }
-      ],
-    });
+    final resp = await _dio.post(
+      '/chat/completions',
+      data: {
+        'model': settings.vlModel,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              ...imageContent,
+              {
+                'type': 'text',
+                'text': AppPrompts.gradePaper(strategyText: strategyText),
+              },
+            ],
+          }
+        ],
+      },
+      options: Options(extra: {'_qwen_scope': 'grade'}),
+    );
     final content = resp.data['choices'][0]['message']['content'] as String;
-    final payload = JsonExtractor.requireListWithReasoning(content, fromKey: 'questions');
-    // reasoning 丢弃：批改的思考过程不暴露给学生/老师
-    return payload.list.map((q) {
-      final qNum = q['number'] is int
-          ? q['number'] as int
-          : int.tryParse(q['number'].toString()) ?? 0;
-      final cps = (q['checkpoints'] as List? ?? [])
-          .map((c) => CheckpointResult(
-                description: (c['description'] ?? '').toString(),
-                passed: c['passed'] as bool? ?? false,
-                pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-                reason: (c['reason'] ?? '').toString(),
-              ))
-          .toList();
-      return QuestionGradeResult(
-        questionNumber: qNum,
-        extractedAnswer: (q['extracted_answer'] ?? '').toString(),
-        checkpoints: cps,
-        confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
-        overallComment: q['overall_comment'] as String?,
-      );
-    }).toList();
+    try {
+      final payload = JsonExtractor.requireListWithReasoning(content,
+          fromKey: 'questions', scope: 'grade');
+      // reasoning 丢弃：批改的思考过程不暴露给学生/老师
+      return payload.list.map((q) {
+        final qNum = q['number'] is int
+            ? q['number'] as int
+            : int.tryParse(q['number'].toString()) ?? 0;
+        final cps = (q['checkpoints'] as List? ?? [])
+            .map((c) => CheckpointResult(
+                  description: (c['description'] ?? '').toString(),
+                  passed: c['passed'] as bool? ?? false,
+                  pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
+                  reason: (c['reason'] ?? '').toString(),
+                ))
+            .toList();
+        return QuestionGradeResult(
+          questionNumber: qNum,
+          extractedAnswer: (q['extracted_answer'] ?? '').toString(),
+          checkpoints: cps,
+          confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
+          overallComment: q['overall_comment'] as String?,
+        );
+      }).toList();
+    } on JsonParseException catch (e) {
+      DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'grade',
+        model: settings.vlModel,
+        endpoint: '/chat/completions',
+        statusCode: resp.statusCode,
+        elapsedMs: 0,
+        status: QwenCallStatus.parseError,
+        messages: const [], // already recorded by interceptor; not duplicating
+        errorMessage: e.toString(),
+      ));
+      rethrow;
+    }
   }
 
   ReferenceAnswer _parseReferenceAnswer(
@@ -338,31 +460,6 @@ class QwenService {
       hasConsensus: json['has_consensus'] as bool? ?? true,
       reasoning: reasoning,
     );
-  }
-
-  static String? _summarizeRequest(List<Map<String, dynamic>> messages) {
-    if (messages.isEmpty) return null;
-    final buf = StringBuffer();
-    for (final m in messages) {
-      final role = (m['role'] ?? '?').toString();
-      final content = m['content'];
-      if (content is List) {
-        final textParts = content
-            .whereType<Map>()
-            .map((e) => e['text'])
-            .whereType<String>()
-            .where((t) => !t.startsWith('data:'))
-            .join(' | ');
-        final imgCount = content
-            .whereType<Map>()
-            .where((e) => e['type'] == 'image_url')
-            .length;
-        buf.writeln('[$role] ($imgCount images) $textParts');
-      } else {
-        buf.writeln('[$role] ${content ?? ""}');
-      }
-    }
-    return buf.toString().trimRight();
   }
 
   static String _mimeType(String path) {

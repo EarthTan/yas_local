@@ -32,11 +32,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _save() async {
+    // Preserve the existing debugMode — the form below only edits API fields.
+    // The dedicated SwitchListTile below the save button is the only place
+    // debugMode should change, and it does so via its own onChanged handler.
+    final current = ref.read(settingsProvider);
     await ref.read(settingsProvider.notifier).update(AppSettings(
           apiKey: _key.text.trim(),
           baseUrl: _base.text.trim(),
           vlModel: _vl.text.trim(),
           textModel: _text.text.trim(),
+          debugMode: current.debugMode,
         ));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已保存')));
@@ -69,6 +74,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 24),
           FilledButton(onPressed: _save, child: const Text('保存')),
           const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('调试模式'),
+            subtitle: const Text(
+              '开启后主页 / 识别 / 策略 / 批改 页面右上角会出现 🐞 入口，'
+              '可查看 AI 调用、过程事件、JSON 解析、内存状态',
+            ),
+            value: ref.watch(settingsProvider).debugMode,
+            onChanged: (v) async {
+              await ref.read(settingsProvider.notifier).update(
+                    ref.read(settingsProvider).copyWith(debugMode: v),
+                  );
+            },
+          ),
           const Text('Key 仅保存在本机，不上传任何服务器。', style: TextStyle(color: Colors.grey, fontSize: 12)),
         ],
       ),

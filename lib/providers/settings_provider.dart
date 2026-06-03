@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/settings.dart';
+import '../services/debug_service.dart';
 import '../services/settings_store.dart';
 
 class SettingsNotifier extends StateNotifier<AppSettings> {
@@ -9,11 +10,28 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> _load() async {
     state = await SettingsStore.load();
+    DebugService.instance.setEnabled(state.debugMode);
+    _refreshSnapshot();
   }
 
   Future<void> update(AppSettings settings) async {
     state = settings;
     await SettingsStore.save(settings);
+    DebugService.instance.setEnabled(state.debugMode);
+    _refreshSnapshot();
+  }
+
+  /// Push the latest settings into the debug snapshot without disturbing
+  /// tasks/references that [TaskNotifier] has already published. If the
+  /// snapshot has never been initialized (e.g. settings loaded before any
+  /// task exists), we use empty lists as a safe default.
+  void _refreshSnapshot() {
+    final existing = DebugService.instance.stateSnapshot;
+    DebugService.instance.refreshStateSnapshot(
+      tasks: existing?.tasks ?? const [],
+      references: existing?.references ?? const [],
+      settings: state.copyWith(apiKey: '***'),
+    );
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/grading_provider.dart';
+import '../widgets/debug_entry_button.dart';
 
 class GradingScreen extends ConsumerStatefulWidget {
   final String taskId;
@@ -32,7 +33,10 @@ class _S extends ConsumerState<GradingScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(title: const Text('批改中…')),
+      appBar: AppBar(
+        title: const Text('批改中…'),
+        actions: const [DebugEntryButton()],
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -57,7 +61,7 @@ class _S extends ConsumerState<GradingScreen> {
               const SizedBox(height: 16),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 FilledButton(
-                    onPressed: () => context.go('/settings'),
+                    onPressed: () => context.push('/settings'),
                     child: const Text('去设置')),
                 const SizedBox(width: 12),
                 OutlinedButton(

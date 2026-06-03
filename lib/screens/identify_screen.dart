@@ -5,6 +5,7 @@ import '../models/identified_question.dart';
 import '../models/rubric.dart';
 import '../providers/identification_provider.dart';
 import '../providers/task_provider.dart';
+import '../widgets/debug_entry_button.dart';
 
 class IdentifyScreen extends ConsumerStatefulWidget {
   final String taskId;
@@ -105,7 +106,10 @@ class _S extends ConsumerState<IdentifyScreen> {
 
     if (state.identifying) {
       return Scaffold(
-        appBar: AppBar(title: const Text('识别题目')),
+        appBar: AppBar(
+          title: const Text('识别题目'),
+          actions: const [DebugEntryButton()],
+        ),
         body: const Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -121,7 +125,10 @@ class _S extends ConsumerState<IdentifyScreen> {
 
     if (state.error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('识别题目')),
+        appBar: AppBar(
+          title: const Text('识别题目'),
+          actions: const [DebugEntryButton()],
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -150,6 +157,7 @@ class _S extends ConsumerState<IdentifyScreen> {
       appBar: AppBar(
         title: const Text('确认题目'),
         actions: [
+          const DebugEntryButton(),
           TextButton(
             onPressed: _editables.isNotEmpty ? _confirm : null,
             child: const Text('确认并生成策略'),

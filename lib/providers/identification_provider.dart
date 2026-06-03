@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/identified_question.dart';
+import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import 'settings_provider.dart';
@@ -52,6 +53,10 @@ class IdentificationNotifier extends StateNotifier<IdentificationState> {
 
     state = const IdentificationState(identifying: true);
     try {
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId',
+        message: 'identify 开始（${imagePaths.length} 张图）',
+      );
       final qwen = QwenService(settings);
       final questions = await qwen.identifyQuestions(imagePaths);
       if (questions.isEmpty) {
@@ -59,9 +64,19 @@ class IdentificationNotifier extends StateNotifier<IdentificationState> {
             error: 'AI 未能识别出任何题目，请检查图片质量或手动输入');
         return;
       }
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId',
+        message: 'identify 完成（${questions.length} 道题）',
+      );
       state = IdentificationState(questions: questions);
     } catch (e) {
       state = IdentificationState(error: ErrorFormatter.format(e));
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId',
+        message: 'identify 失败',
+        level: EventLevel.error,
+        data: {'error': e.toString()},
+      );
     }
   }
 }

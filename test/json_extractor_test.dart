@@ -1,7 +1,53 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/services/debug_service.dart';
 import 'package:yas_local/services/json_extractor.dart';
 
 void main() {
+  setUp(() {
+    DebugService.instance.resetForTest();
+    DebugService.instance.setEnabled(true);
+  });
+
+  group('scope propagation', () {
+    test('requireObject defaults scope to "caller" when not specified', () {
+      JsonExtractor.requireObject('{"a": 1}');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
+    });
+
+    test('requireObject records the scope passed in', () {
+      JsonExtractor.requireObject('{"a": 1}', scope: 'strategy');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
+    });
+
+    test('requireList defaults scope to "caller" when not specified', () {
+      JsonExtractor.requireList('[1, 2]');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
+    });
+
+    test('requireList records the scope passed in', () {
+      JsonExtractor.requireList('[1, 2]', scope: 'grade');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'grade');
+    });
+
+    test('requireObjectWithReasoning threads scope to the underlying require', () {
+      JsonExtractor.requireObjectWithReasoning('{"a": 1}', scope: 'refine');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'refine');
+    });
+
+    test('requireListWithReasoning threads scope to the underlying require', () {
+      JsonExtractor.requireListWithReasoning('[1]', fromKey: null, scope: 'identify');
+      expect(DebugService.instance.jsonAttempts.single.scope, 'identify');
+    });
+
+    test('failed extraction also records the scope', () {
+      expect(
+        () => JsonExtractor.requireObject('not json at all', scope: 'strategy'),
+        throwsA(isA<JsonParseException>()),
+      );
+      expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
+    });
+  });
+
   // ── requireObject ──────────────────────────────────────────────────────────
 
   group('JsonExtractor.requireObject', () {
@@ -239,6 +285,58 @@ void main() {
       final payload = JsonExtractor.requireListWithReasoning(text, fromKey: 'questions');
       expect(payload.reasoning, '先看题');
       expect(payload.list.first['n'], 1);
+    });
+  });
+
+  // ── DebugService instrumentation ───────────────────────────────────────────
+
+  group('DebugService instrumentation', () {
+    setUp(() {
+      DebugService.instance.resetForTest();
+      DebugService.instance.setEnabled(true);
+    });
+
+    test('successful extraction records an attempt', () {
+      JsonExtractor.requireObject('{"a": 1}');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
+    });
+
+    test('failed extraction records attempts including the failing branch and finalException', () {
+      try {
+        JsonExtractor.requireObject('this is not json');
+      } catch (_) {}
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      expect(r.attempts.where((a) => a.ok), isNotEmpty); // strip_thinking succeeded
+      expect(r.attempts.where((a) => !a.ok), isNotEmpty); // braces_object failed
+      expect(r.finalException, isNotNull);
+    });
+
+    test('successful list extraction records an attempt', () {
+      JsonExtractor.requireList('[1, 2, 3]');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
+    });
+
+    test('failed list extraction records finalException', () {
+      try {
+        JsonExtractor.requireList('not a list');
+      } catch (_) {}
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      expect(r.attempts.where((a) => !a.ok), isNotEmpty);
+      expect(r.finalException, isNotNull);
+    });
+
+    test('fromKey success records the fromKey method name', () {
+      JsonExtractor.requireList('{"questions": [1, 2]}', fromKey: 'questions');
+      expect(DebugService.instance.jsonAttempts, hasLength(1));
+      final r = DebugService.instance.jsonAttempts.single;
+      final fromKeyAttempt = r.attempts.firstWhere(
+        (a) => a.method.endsWith('_with_fromKey'),
+      );
+      expect(fromKeyAttempt.ok, isTrue);
     });
   });
 }

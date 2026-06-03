@@ -5,6 +5,7 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/create_task_screen.dart';
 import 'screens/capture_screen.dart';
+import 'screens/debug_screen.dart';
 import 'screens/identify_screen.dart';
 import 'screens/grading_screen.dart';
 import 'screens/results_screen.dart';
@@ -25,6 +26,7 @@ final _router = GoRouter(
     GoRoute(path: '/tasks/:id/grading', builder: (_, s) => GradingScreen(taskId: s.pathParameters['id']!)),
     GoRoute(path: '/tasks/:id/results', builder: (_, s) => ResultsScreen(taskId: s.pathParameters['id']!)),
     GoRoute(path: '/submissions/:sid', builder: (_, s) => PaperDetailScreen(submissionId: s.pathParameters['sid']!)),
+    GoRoute(path: '/debug', builder: (context, _) => const DebugScreen()),
   ],
 );
 
