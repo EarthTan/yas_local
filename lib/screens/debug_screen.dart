@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/debug_provider.dart';
+import '../providers/task_provider.dart';
 import '../services/debug_service.dart';
 
 class DebugScreen extends ConsumerWidget {
@@ -251,17 +252,22 @@ class _StateTab extends ConsumerWidget {
       ListTile(
         title: Text('📁 Tasks (${tasks.length})', style: const TextStyle(color: Colors.black)),
       ),
-      for (final t in tasks) _taskTile(t),
+      for (final t in tasks) _TaskTile(task: t),
     ];
   }
+}
 
-  Widget _taskTile(dynamic t) {
-    // Access by name. Models are typed but we use dynamic to avoid imports.
-    final name = t.name as String;
-    final subs = (t.submissions as List?) ?? const [];
-    final rubric = (t.rubric as List?) ?? const [];
-    final questionPaperPaths = (t.questionPaperPaths as List?) ?? const [];
-    final answerImagePaths = (t.answerImagePaths as List?) ?? const [];
+class _TaskTile extends ConsumerWidget {
+  const _TaskTile({required this.task});
+  final dynamic task; // GradingTask at runtime; dynamic to avoid import
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final name = task.name as String;
+    final subs = ref.read(taskProvider.notifier).submissionsFor(task.id as String);
+    final rubric = (task.rubric as List?) ?? const [];
+    final questionPaperPaths = (task.questionPaperPaths as List?) ?? const [];
+    final answerImagePaths = (task.answerImagePaths as List?) ?? const [];
     return Padding(
       padding: const EdgeInsets.only(left: 16),
       child: ExpansionTile(
