@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/task.dart';
 import '../models/submission.dart';
 import '../models/rubric.dart';
+import '../providers/settings_provider.dart';
+import '../services/debug_service.dart';
 import '../services/task_store.dart';
 
 class TaskState {
@@ -19,13 +21,16 @@ class TaskState {
 }
 
 class TaskNotifier extends StateNotifier<TaskState> {
-  TaskNotifier() : super(const TaskState()) {
+  TaskNotifier(this.ref) : super(const TaskState()) {
     _load();
   }
+
+  final Ref ref;
 
   Future<void> _load() async {
     final data = await TaskStore.load();
     state = TaskState(tasks: data.tasks, submissions: data.submissions, loaded: true);
+    _refreshDebugSnapshot();
   }
 
   Future<void> _persist() async =>
@@ -34,6 +39,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
   Future<void> addTask(GradingTask task) async {
     state = state.copyWith(tasks: [...state.tasks, task]);
     await _persist();
+    _refreshDebugSnapshot();
   }
 
   List<Submission> submissionsFor(String taskId) =>
@@ -50,6 +56,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
     final others = state.submissions.where((s) => s.taskId != taskId).toList();
     state = state.copyWith(submissions: [...others, ...subs]);
     await _persist();
+    _refreshDebugSnapshot();
   }
 
   Future<void> updateSubmission(Submission sub) async {
@@ -59,6 +66,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
       ],
     );
     await _persist();
+    _refreshDebugSnapshot();
   }
 
   Future<void> resetGradingResults(String taskId) async {
@@ -72,6 +80,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
       ],
     );
     await _persist();
+    _refreshDebugSnapshot();
   }
 
   Future<void> updateTaskRubric(String taskId, List<RubricItem> rubric) async {
@@ -93,8 +102,18 @@ class TaskNotifier extends StateNotifier<TaskState> {
       ],
     );
     await _persist();
+    _refreshDebugSnapshot();
+  }
+
+  void _refreshDebugSnapshot() {
+    final s = ref.read(settingsProvider);
+    DebugService.instance.refreshStateSnapshot(
+      tasks: state.tasks,
+      references: const [], // references are loaded per-task; debug screen joins with task.refs
+      settings: s.copyWith(apiKey: '***'),
+    );
   }
 }
 
 final taskProvider =
-    StateNotifierProvider<TaskNotifier, TaskState>((ref) => TaskNotifier());
+    StateNotifierProvider<TaskNotifier, TaskState>((ref) => TaskNotifier(ref));
