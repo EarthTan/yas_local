@@ -43,24 +43,45 @@ class QwenService {
         if (data is Map && data['messages'] is List) {
           options.extra['_qwen_messages'] = data['messages'] as List<Map<String, dynamic>>;
         }
+        options.extra['_qwen_start'] = DateTime.now();
         handler.next(options);
       },
       onResponse: (response, handler) {
         final messages = response.requestOptions.extra['_qwen_messages'] as List<Map<String, dynamic>>?;
+        final start = response.requestOptions.extra['_qwen_start'] as DateTime?;
         final choice = response.data?['choices']?[0]?['message'];
         if (messages != null && choice != null) {
           final content = choice['content'] as String? ?? '';
           final reasoning = choice['reasoning_content'] as String?;
-          QwenLogger.logRound(
+          final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
+          QwenLogger.logSuccess(
             model: settings.vlModel,
             endpoint: response.requestOptions.path,
             messages: messages,
             responseContent: content,
             reasoningContent: reasoning,
             statusCode: response.statusCode,
+            elapsedMs: elapsed,
           );
         }
         handler.next(response);
+      },
+      onError: (e, handler) {
+        final messages = e.requestOptions.extra['_qwen_messages'] as List<Map<String, dynamic>>?;
+        final start = e.requestOptions.extra['_qwen_start'] as DateTime?;
+        final elapsed = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
+        final summary = messages == null ? null : _summarizeRequest(messages);
+        final body = e.response?.data?.toString();
+        QwenLogger.logError(
+          endpoint: e.requestOptions.path,
+          statusCode: e.response?.statusCode,
+          errorType: e.type.name,
+          message: e.message ?? '',
+          requestSummary: summary,
+          responseSnippet: body == null ? null : (body.length > 500 ? '${body.substring(0, 500)}…' : body),
+          elapsedMs: elapsed,
+        );
+        handler.next(e);
       },
     ));
   }
@@ -311,6 +332,31 @@ class QwenService {
   /// before attempting JSON extraction, otherwise the first `{` lands inside the thinking block.
   String _stripThinking(String text) =>
       text.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
+
+  static String? _summarizeRequest(List<Map<String, dynamic>> messages) {
+    if (messages.isEmpty) return null;
+    final buf = StringBuffer();
+    for (final m in messages) {
+      final role = (m['role'] ?? '?').toString();
+      final content = m['content'];
+      if (content is List) {
+        final textParts = content
+            .whereType<Map>()
+            .map((e) => e['text'])
+            .whereType<String>()
+            .where((t) => !t.startsWith('data:'))
+            .join(' | ');
+        final imgCount = content
+            .whereType<Map>()
+            .where((e) => e['type'] == 'image_url')
+            .length;
+        buf.writeln('[$role] ($imgCount images) $textParts');
+      } else {
+        buf.writeln('[$role] ${content ?? ""}');
+      }
+    }
+    return buf.toString().trimRight();
+  }
 
   static String _mimeType(String path) {
     final ext = path.split('.').last.toLowerCase();
