@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
 import '../models/settings.dart';
+import '../services/debug_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -69,6 +70,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 24),
           FilledButton(onPressed: _save, child: const Text('保存')),
           const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('调试模式'),
+            subtitle: const Text('开启后主页右上角会出现 debug 入口，可查看 AI 调用、过程事件、内存状态'),
+            value: ref.watch(settingsProvider).debugMode,
+            onChanged: (v) async {
+              await ref.read(settingsProvider.notifier).update(
+                    ref.read(settingsProvider).copyWith(debugMode: v),
+                  );
+              DebugService.instance.setEnabled(v);
+            },
+          ),
           const Text('Key 仅保存在本机，不上传任何服务器。', style: TextStyle(color: Colors.grey, fontSize: 12)),
         ],
       ),
