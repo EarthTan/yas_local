@@ -1,9 +1,13 @@
 import 'package:dio/dio.dart';
+import 'json_extractor.dart';
 
 class ErrorFormatter {
   static String format(Object e) {
     if (e is DioException) {
       return _formatDio(e);
+    }
+    if (e is JsonParseException) {
+      return '❌ AI 返回内容无法解析为 JSON，请重试。\n（${e.message}）';
     }
     final msg = e.toString();
     return msg.length > 300 ? '${msg.substring(0, 300)}…' : msg;
