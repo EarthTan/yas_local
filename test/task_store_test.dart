@@ -48,4 +48,19 @@ void main() {
     expect(decoded.first.questionNumber, 1);
     expect(decoded.first.checkpoints.first.points, 5);
   });
+
+  test('ReferenceAnswer.fromJson 回填空 checkpoint id', () {
+    final raw = ReferenceStore.encode([
+      const ReferenceAnswer(
+        questionNumber: 3,
+        checkpoints: [
+          CheckpointDef(id: '', description: 'A', points: 1),
+          CheckpointDef(id: '', description: 'B', points: 2),
+        ],
+      ),
+    ]);
+    final decoded = ReferenceStore.decode(raw);
+    expect(decoded.single.checkpoints[0].id, 'q3-cp0');
+    expect(decoded.single.checkpoints[1].id, 'q3-cp1');
+  });
 }
