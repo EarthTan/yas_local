@@ -57,7 +57,7 @@ class _S extends ConsumerState<GradingScreen> {
               const SizedBox(height: 16),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 FilledButton(
-                    onPressed: () => context.go('/settings'),
+                    onPressed: () => context.push('/settings'),
                     child: const Text('去设置')),
                 const SizedBox(width: 12),
                 OutlinedButton(
