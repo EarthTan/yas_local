@@ -21,4 +21,33 @@ void main() {
     expect(AppSettings.fromJson(s.toJson()).vlModel, 'qwen-vl-plus');
     expect(AppSettings.fromJson(s.toJson()).apiKey, 'k');
   });
+
+  test('debugMode defaults to false', () {
+    expect(const AppSettings().debugMode, isFalse);
+  });
+
+  test('copyWith preserves debugMode when not specified', () {
+    const s = AppSettings(debugMode: true);
+    expect(s.copyWith(apiKey: 'new').debugMode, isTrue);
+  });
+
+  test('copyWith overrides debugMode when specified', () {
+    const s = AppSettings(debugMode: false);
+    expect(s.copyWith(debugMode: true).debugMode, isTrue);
+  });
+
+  test('fromJson falls back to false when debugMode missing', () {
+    final s = AppSettings.fromJson({'apiKey': 'k', 'baseUrl': 'b'});
+    expect(s.debugMode, isFalse);
+  });
+
+  test('fromJson reads debugMode', () {
+    final s = AppSettings.fromJson({'debugMode': true});
+    expect(s.debugMode, isTrue);
+  });
+
+  test('toJson includes debugMode', () {
+    const s = AppSettings(debugMode: true);
+    expect(s.toJson()['debugMode'], isTrue);
+  });
 }
