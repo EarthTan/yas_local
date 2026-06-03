@@ -5,6 +5,7 @@ import '../models/reference_answer.dart';
 import '../models/strategy_message.dart';
 import '../providers/strategy_provider.dart';
 import '../providers/task_provider.dart';
+import '../widgets/debug_entry_button.dart';
 
 class StrategyReviewScreen extends ConsumerStatefulWidget {
   final String taskId;
@@ -33,6 +34,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
       appBar: AppBar(
         title: const Text('批改策略'),
         actions: [
+          const DebugEntryButton(),
           if (!state.generating && state.error == null && state.references.isNotEmpty)
             TextButton(
               onPressed: () {
