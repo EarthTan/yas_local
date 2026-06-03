@@ -1,7 +1,7 @@
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/submission.dart';
 import '../models/checkpoint.dart';
+import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
 import 'settings_provider.dart';
@@ -75,6 +75,7 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
 
         final grades = await qwen.gradePaper(
           imagePath: sub.imagePath!,
+          questionPaperPaths: task.questionPaperPaths,
           rubric: task.rubric,
           refs: references,
         );
@@ -122,41 +123,12 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
       } catch (e) {
         await notifier.updateSubmission(
             sub.copyWith(status: SubmissionStatus.failed));
-        firstApiError ??= _formatError(e);
+        firstApiError ??= ErrorFormatter.format(e);
       }
       state = state.copyWith(done: state.done + 1);
     }
 
     state = state.copyWith(running: false, error: firstApiError);
-  }
-
-  String _formatError(Object e) {
-    if (e is DioException) {
-      final status = e.response?.statusCode;
-      final actualUrl = e.requestOptions.uri.toString();
-      final body = e.response?.data?.toString() ?? '';
-      final snippet =
-          body.length > 300 ? '${body.substring(0, 300)}…' : body;
-
-      final header = switch (status) {
-        401 => '❌ API Key 无效（401 Unauthorized）',
-        403 => '❌ 权限不足（403 Forbidden）',
-        404 => '❌ 接口不存在（404 Not Found）',
-        422 => '❌ 请求格式有误（422 Unprocessable）',
-        429 => '❌ 请求过频（429 Rate Limit）',
-        500 || 502 || 503 => '❌ 服务器错误（$status）',
-        null => '❌ 网络错误：${e.message ?? e.type.name}',
-        _ => '❌ HTTP $status',
-      };
-
-      return [
-        header,
-        '实际请求 URL：\n$actualUrl',
-        if (snippet.isNotEmpty) '服务器返回：\n$snippet',
-      ].join('\n\n');
-    }
-    final msg = e.toString();
-    return '批改出错：${msg.length > 400 ? '${msg.substring(0, 400)}…' : msg}';
   }
 }
 

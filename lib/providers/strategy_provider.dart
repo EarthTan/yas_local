@@ -1,9 +1,9 @@
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/strategy_message.dart';
-import '../models/submission.dart';
+import '../models/task.dart';
+import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
 import 'settings_provider.dart';
@@ -80,14 +80,14 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     }
 
     // No cache — generate Phase 1
-    await _generate(taskId, task.rubric, notifier.submissionsFor(taskId), settings);
+    await _generate(taskId, task.rubric, settings, task);
   }
 
   Future<void> _generate(
     String taskId,
     List<RubricItem> rubric,
-    List<Submission> subs,
     dynamic settings,
+    GradingTask task,
   ) async {
     state = StrategyState(
       generating: true,
@@ -101,24 +101,15 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
     for (final item in rubric) {
       try {
-        ReferenceAnswer ref;
-        if (item.correctAnswer != null) {
-          ref = await qwen.generateReferenceWithAnswer(item, totalQuestions: rubric.length);
-        } else {
-          final images = _pickSampleImages(subs);
-          if (images.isEmpty) {
-            ref = ReferenceAnswer(
-              questionNumber: item.questionNumber,
-              checkpoints: [],
-              hasConsensus: false,
-            );
-          } else {
-            ref = await qwen.generateReferenceFromImages(item, images, totalQuestions: rubric.length);
-          }
-        }
+        final ref = await qwen.generateStrategy(
+          rubricItem: item,
+          questionPaperPaths: task.questionPaperPaths,
+          answerImagePaths: task.answerImagePaths,
+          totalQuestions: rubric.length,
+        );
         references.add(ref);
       } catch (e) {
-        firstError ??= _formatError(e);
+        firstError ??= ErrorFormatter.format(e);
         references.add(ReferenceAnswer(
           questionNumber: item.questionNumber,
           checkpoints: [],
@@ -148,7 +139,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     final notifier = ref.read(taskProvider.notifier);
     final task = notifier.taskById(taskId);
     if (task == null) return;
-    await _generate(taskId, task.rubric, notifier.submissionsFor(taskId), settings);
+    await _generate(taskId, task.rubric, settings, task);
   }
 
   /// Send a refinement message for a specific question.
@@ -208,7 +199,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       // On error, still record the user message in history
       final newRef = current.copyWith(chatHistory: [
         ...updatedHistory,
-        StrategyMessage(role: 'assistant', content: '出错了：${_formatError(e)}'),
+        StrategyMessage(role: 'assistant', content: ErrorFormatter.format(e)),
       ]);
       final newRefs = [...state.references];
       newRefs[refIndex] = newRef;
@@ -243,37 +234,6 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     state = state.copyWith(references: newRefs);
   }
 
-  List<String> _pickSampleImages(List<Submission> subs) {
-    final paths = subs
-        .where((s) => s.imagePath != null)
-        .map((s) => s.imagePath!)
-        .toList();
-    if (paths.length <= 5) return paths;
-    final step = paths.length ~/ 5;
-    return [for (int i = 0; i < 5; i++) paths[i * step]];
-  }
-
-  String _formatError(Object e) {
-    if (e is DioException) {
-      final status = e.response?.statusCode;
-      final actualUrl = e.requestOptions.uri.toString();
-      final body = e.response?.data?.toString() ?? '';
-      final snippet = body.length > 200 ? '${body.substring(0, 200)}…' : body;
-
-      final header = switch (status) {
-        401 => '❌ API Key 无效（401）',
-        403 => '❌ 权限不足（403）',
-        404 => '❌ 接口不存在（404）',
-        429 => '❌ 请求过频（429）',
-        500 || 502 || 503 => '❌ 服务器错误（$status）',
-        null => '❌ 网络错误：${e.message ?? e.type.name}',
-        _ => '❌ HTTP $status',
-      };
-      return '$header\n$actualUrl${snippet.isNotEmpty ? '\n$snippet' : ''}';
-    }
-    final msg = e.toString();
-    return msg.length > 300 ? '${msg.substring(0, 300)}…' : msg;
-  }
 }
 
 final strategyProvider =
