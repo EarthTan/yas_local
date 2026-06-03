@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/settings.dart';
+import '../services/debug_service.dart';
 import '../services/settings_store.dart';
 
 class SettingsNotifier extends StateNotifier<AppSettings> {
@@ -9,11 +10,23 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> _load() async {
     state = await SettingsStore.load();
+    DebugService.instance.setEnabled(state.debugMode);
+    DebugService.instance.refreshStateSnapshot(
+      tasks: const [], // populated by TaskNotifier
+      references: const [],
+      settings: state.copyWith(apiKey: '***'),
+    );
   }
 
   Future<void> update(AppSettings settings) async {
     state = settings;
     await SettingsStore.save(settings);
+    DebugService.instance.setEnabled(state.debugMode);
+    DebugService.instance.refreshStateSnapshot(
+      tasks: const [], // populated by TaskNotifier
+      references: const [],
+      settings: state.copyWith(apiKey: '***'),
+    );
   }
 }
 
