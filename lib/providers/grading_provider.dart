@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/submission.dart';
 import '../models/checkpoint.dart';
+import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
@@ -59,6 +60,11 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
       total: subs.length,
       done: 0,
       running: true,
+    );
+
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'grading 开始（${subs.length} 份）',
     );
 
     String? firstApiError;
@@ -120,15 +126,29 @@ class GradingNotifier extends StateNotifier<GradingProgress> {
 
         await notifier.updateSubmission(
             sub.copyWith(status: SubmissionStatus.done, items: items));
+        DebugService.instance.recordEvent(
+          scope: 'sub:${sub.id}',
+          message: 'graded（${items.length} 题）',
+        );
       } catch (e) {
         await notifier.updateSubmission(
             sub.copyWith(status: SubmissionStatus.failed));
+        DebugService.instance.recordEvent(
+          scope: 'sub:${sub.id}',
+          message: 'failed',
+          level: EventLevel.error,
+          data: {'error': e.toString()},
+        );
         firstApiError ??= ErrorFormatter.format(e);
       }
       state = state.copyWith(done: state.done + 1);
     }
 
     state = state.copyWith(running: false, error: firstApiError);
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'grading 结束',
+    );
   }
 }
 
