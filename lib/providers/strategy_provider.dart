@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/strategy_message.dart';
@@ -267,6 +268,82 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       return r;
     }).toList();
     state = state.copyWith(references: newRefs);
+  }
+
+  void editCheckpoint(
+    int questionNumber,
+    String checkpointId, {
+    String? description,
+    int? points,
+  }) {
+    state = state.copyWith(
+      references: [
+        for (final r in state.references)
+          if (r.questionNumber == questionNumber)
+            r.copyWith(
+              checkpoints: [
+                for (final c in r.checkpoints)
+                  if (c.id == checkpointId)
+                    c.copyWith(
+                      description: description ?? c.description,
+                      points: points ?? c.points,
+                    )
+                  else
+                    c,
+              ],
+            )
+          else
+            r,
+      ],
+    );
+    DebugService.instance.recordEvent(
+      scope: 'task:${ref.read(taskProvider).tasks.isNotEmpty ? ref.read(taskProvider).tasks.first.id : "?"} / q:$questionNumber',
+      message: 'editCheckpoint $checkpointId',
+    );
+  }
+
+  void addCheckpoint(
+    int questionNumber, {
+    required String description,
+    required int points,
+  }) {
+    final newId = DateTime.now().microsecondsSinceEpoch.toString();
+    state = state.copyWith(
+      references: [
+        for (final r in state.references)
+          if (r.questionNumber == questionNumber)
+            r.copyWith(
+              checkpoints: [
+                ...r.checkpoints,
+                CheckpointDef(id: newId, description: description, points: points),
+              ],
+            )
+          else
+            r,
+      ],
+    );
+    DebugService.instance.recordEvent(
+      scope: 'strategy / q:$questionNumber',
+      message: 'addCheckpoint $newId',
+    );
+  }
+
+  void removeCheckpoint(int questionNumber, String checkpointId) {
+    state = state.copyWith(
+      references: [
+        for (final r in state.references)
+          if (r.questionNumber == questionNumber)
+            r.copyWith(
+              checkpoints: r.checkpoints.where((c) => c.id != checkpointId).toList(),
+            )
+          else
+            r,
+      ],
+    );
+    DebugService.instance.recordEvent(
+      scope: 'strategy / q:$questionNumber',
+      message: 'removeCheckpoint $checkpointId',
+    );
   }
 
 }
