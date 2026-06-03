@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
 import '../models/settings.dart';
-import '../services/debug_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -78,7 +77,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               await ref.read(settingsProvider.notifier).update(
                     ref.read(settingsProvider).copyWith(debugMode: v),
                   );
-              DebugService.instance.setEnabled(v);
             },
           ),
           const Text('Key 仅保存在本机，不上传任何服务器。', style: TextStyle(color: Colors.grey, fontSize: 12)),
