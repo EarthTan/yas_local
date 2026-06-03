@@ -1,11 +1,88 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:yas_local/models/checkpoint.dart';
 import 'package:yas_local/models/reference_answer.dart';
+import 'package:yas_local/models/rubric.dart';
+import 'package:yas_local/models/settings.dart';
+import 'package:yas_local/models/task.dart';
+import 'package:yas_local/providers/settings_provider.dart';
+import 'package:yas_local/providers/strategy_provider.dart';
+import 'package:yas_local/providers/task_provider.dart';
 import 'package:yas_local/screens/strategy_review/bottom_action_bar.dart';
 import 'package:yas_local/screens/strategy_review/edit_checkpoint_sheet.dart';
 import 'package:yas_local/screens/strategy_review/progress_dots.dart';
 import 'package:yas_local/screens/strategy_review/question_page.dart';
+import 'package:yas_local/screens/strategy_review_screen.dart';
+
+class _SeededNotifier extends StrategyNotifier {
+  _SeededNotifier(super.ref, this._refs) {
+    state = StrategyState(references: _refs);
+  }
+  final List<ReferenceAnswer> _refs;
+
+  @override
+  Future<void> loadOrGenerate(String taskId) async {}
+
+  @override
+  Future<void> saveAllConfirmed(String taskId) async {}
+}
+
+GradingTask _taskWithRubricForScreen(List<RubricItem> rubric) => GradingTask(
+      id: 't1',
+      name: 'T1',
+      subject: 'math',
+      createdAt: DateTime(2026),
+      rubric: rubric,
+      questionPaperPaths: const [],
+      answerImagePaths: const [],
+    );
+
+class _FakeScreenTaskNotifier extends TaskNotifier {
+  _FakeScreenTaskNotifier(super.ref, this._task);
+  final GradingTask _task;
+  @override
+  GradingTask? taskById(String id) => _task.id == id ? _task : null;
+}
+
+class _FakeScreenSettingsNotifier extends SettingsNotifier {
+  _FakeScreenSettingsNotifier() {
+    state = const AppSettings(apiKey: 'k');
+  }
+}
+
+Future<void> _pumpScreen(
+  WidgetTester tester, {
+  required List<ReferenceAnswer> refs,
+  required GradingTask task,
+}) async {
+  final router = GoRouter(
+    initialLocation: '/tasks/t1/strategy',
+    routes: [
+      GoRoute(
+        path: '/tasks/:id',
+        builder: (_, _) => const Scaffold(body: Text('hub')),
+      ),
+      GoRoute(
+        path: '/tasks/:id/strategy',
+        builder: (_, s) => StrategyReviewScreen(taskId: s.pathParameters['id']!),
+      ),
+    ],
+  );
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        strategyProvider.overrideWith((ref) => _SeededNotifier(ref, refs)),
+        taskProvider.overrideWith((ref) => _FakeScreenTaskNotifier(ref, task)),
+        settingsProvider.overrideWith((ref) => _FakeScreenSettingsNotifier()),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('EditCheckpointSheet 编辑模式：保存按钮初始 enabled', (tester) async {
@@ -377,5 +454,80 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '添加得分点'));
     await tester.pump();
     expect(addCount, 1);
+  });
+
+  group('StrategyReviewScreen PageView 集成', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    // Mock path_provider so TaskNotifier constructor (called by the real
+    // provider when not overridden) doesn't blow up during widget tests.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (call) async => '/tmp',
+    );
+
+    testWidgets('StrategyReviewScreen PageView 渲染 N 页', (tester) async {
+      final refs = [
+        for (var i = 1; i <= 3; i++)
+          ReferenceAnswer(
+            questionNumber: i,
+            checkpoints: [CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1)],
+          ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 1),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 1),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 1),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      expect(find.byType(PageView), findsOneWidget);
+      expect(find.text('第 1 题'), findsOneWidget);
+    });
+
+    testWidgets('确认此题 后 state.confirmed = true 并 auto-advance', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 1)],
+        ),
+        ReferenceAnswer(
+          questionNumber: 2,
+          checkpoints: const [CheckpointDef(id: 'q2-cp0', description: 'A', points: 1)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 1),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 1),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      await tester.tap(find.text('确认此题'));
+      await tester.pumpAndSettle();
+      // After confirm, auto-advance to the next unconfirmed (page 1 = 第 2 题)
+      expect(find.text('第 2 题'), findsOneWidget);
+    });
+
+    testWidgets('进度点 tap 跳到指定题', (tester) async {
+      final refs = [
+        for (var i = 1; i <= 3; i++)
+          ReferenceAnswer(
+            questionNumber: i,
+            checkpoints: [CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1)],
+          ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 1),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 1),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 1),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      // Tap the 3rd progress dot via ProgressDots descendants
+      final allDots = find.descendant(
+        of: find.byType(ProgressDots),
+        matching: find.byType(GestureDetector),
+      );
+      await tester.tap(allDots.at(2));
+      await tester.pumpAndSettle();
+      expect(find.text('第 3 题'), findsOneWidget);
+    });
   });
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -29,6 +30,15 @@ class _AllConfirmedNotifier extends StrategyNotifier {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // Mock path_provider so the real TaskNotifier (created when the new
+  // StrategyReviewScreen reads taskProvider) doesn't blow up in widget tests.
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+    const MethodChannel('plugins.flutter.io/path_provider'),
+    (call) async => '/tmp',
+  );
+
   testWidgets('confirming all strategies navigates to task hub, not grading screen',
       (tester) async {
     final router = GoRouter(
