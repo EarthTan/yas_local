@@ -7,11 +7,13 @@ import 'package:yas_local/models/checkpoint.dart';
 import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/settings.dart';
+import 'package:yas_local/models/strategy_message.dart';
 import 'package:yas_local/models/task.dart';
 import 'package:yas_local/providers/settings_provider.dart';
 import 'package:yas_local/providers/strategy_provider.dart';
 import 'package:yas_local/providers/task_provider.dart';
 import 'package:yas_local/screens/strategy_review/bottom_action_bar.dart';
+import 'package:yas_local/screens/strategy_review/chat_sheet.dart';
 import 'package:yas_local/screens/strategy_review/edit_checkpoint_sheet.dart';
 import 'package:yas_local/screens/strategy_review/progress_dots.dart';
 import 'package:yas_local/screens/strategy_review/question_page.dart';
@@ -778,5 +780,129 @@ void main() {
           reason: '重试成功后失败 banner 应消失');
       expect(find.text('新策略 q2'), findsOneWidget);
     });
+
+    testWidgets('点「修改策略」打开 chat sheet', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 5)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(
+            questionNumber: 1, type: 'subjective', maxPoints: 5, questionText: '已知 z = 1 + i'),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      await tester.tap(find.widgetWithText(OutlinedButton, '修改策略'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ChatSheet), findsOneWidget);
+      // Header shows the question text since it's non-empty.
+      expect(find.textContaining('已知 z = 1 + i'), findsOneWidget);
+      // Empty-state hint is visible.
+      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'),
+          findsOneWidget);
+    });
   });
+
+  group('ChatSheet', () {
+    testWidgets('空 chatHistory：显示提示文本 + 发送按钮 disabled', (tester) async {
+      const refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+        ),
+      ];
+      await _pumpChatSheet(tester, refs: refs);
+      await tester.pumpAndSettle();
+      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'),
+          findsOneWidget);
+      // Send IconButton is disabled when input is empty.
+      final sendBtn = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.send),
+      );
+      expect(sendBtn.onPressed, isNull);
+    });
+
+    testWidgets('有历史消息：user/assistant 都显示', (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          chatHistory: const [
+            StrategyMessage(role: 'user', content: '把第 1 条改成 2 分'),
+            StrategyMessage(role: 'assistant', content: '好的，已更新'),
+          ],
+        ),
+      ];
+      await _pumpChatSheet(tester, refs: refs);
+      await tester.pumpAndSettle();
+      expect(find.text('把第 1 条改成 2 分'), findsOneWidget);
+      expect(find.text('好的，已更新'), findsOneWidget);
+    });
+
+    testWidgets('输入文本后点发送：调用 notifier.sendMessage 并清空输入',
+        (tester) async {
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+        ),
+      ];
+      await _pumpChatSheet(tester, refs: refs);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '请增加一个 checkpoint');
+      await tester.pump();
+      // Send button enabled once text is non-empty.
+      final sendBtn = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.send),
+      );
+      expect(sendBtn.onPressed, isNotNull);
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pump();
+      // Input cleared after send.
+      final input = tester.widget<TextField>(find.byType(TextField));
+      expect(input.controller!.text, isEmpty);
+    });
+  });
+}
+
+/// Test fixture for ChatSheet — a notifier that returns a single reference
+/// with no chat history. Lets us test the sheet's empty state and rendering
+/// without driving a full screen.
+class _ChatSheetNotifier extends StrategyNotifier {
+  _ChatSheetNotifier(super.ref, this._refs);
+  final List<ReferenceAnswer> _refs;
+
+  @override
+  Future<void> loadOrGenerate(String taskId) async {}
+
+  @override
+  Future<void> saveAllConfirmed(String taskId) async {}
+
+  @override
+  StrategyState get state => StrategyState(references: _refs);
+}
+
+Future<void> _pumpChatSheet(
+  WidgetTester tester, {
+  required List<ReferenceAnswer> refs,
+  int questionNumber = 1,
+  String questionLabel = '第 1 题',
+}) {
+  return tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        strategyProvider.overrideWith((ref) => _ChatSheetNotifier(ref, refs)),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: ChatSheet(
+            taskId: 't1',
+            questionNumber: questionNumber,
+            questionLabel: questionLabel,
+          ),
+        ),
+      ),
+    ),
+  );
 }

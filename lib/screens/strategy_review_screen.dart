@@ -7,7 +7,9 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../providers/strategy_provider.dart';
 import '../providers/task_provider.dart';
+import '../services/debug_service.dart';
 import 'strategy_review/bottom_action_bar.dart';
+import 'strategy_review/chat_sheet.dart';
 import 'strategy_review/edit_checkpoint_sheet.dart';
 import 'strategy_review/progress_dots.dart';
 import 'strategy_review/question_page.dart';
@@ -40,6 +42,7 @@ class StrategyReviewScreen extends ConsumerStatefulWidget {
 class _S extends ConsumerState<StrategyReviewScreen> {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
+  int _lastRefsLength = -1;
 
   @override
   void initState() {
@@ -80,6 +83,20 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     final notifier = ref.read(strategyProvider.notifier);
     final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
     final refs = state.references;
+
+    // Diagnostic: user reported "重试此题 causes progress dots to grow".
+    // Current code provably cannot grow the list (see retryGenerate test),
+    // but if it ever does, this log will surface the change with a stack
+    // trace so we can see which call site mutated the list.
+    if (refs.length != _lastRefsLength) {
+      DebugService.instance.recordEvent(
+        scope: 'strategy / task:${widget.taskId}',
+        message: 'refs.length: $_lastRefsLength → ${refs.length}',
+        data: {'prev': _lastRefsLength, 'next': refs.length},
+      );
+      _lastRefsLength = refs.length;
+    }
+
     final isLast = _currentIndex >= refs.length - 1;
     final currentRef = refs.isEmpty ? null : refs[_currentIndex.clamp(0, refs.length - 1)];
 
@@ -202,10 +219,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   confirmed: currentRef.confirmed,
                   isLast: isLast,
                   isRefining: state.refining && state.refiningQuestion == currentRef.questionNumber,
-                  onRefine: () {
-                    // Chat foldable lives in body — for v1, do nothing here.
-                    // Future task: open chat sheet or scroll-to-chat.
-                  },
+                  onRefine: () => _openChatSheet(currentRef),
                   onConfirm: () {
                     if (currentRef.confirmed) {
                       notifier.unconfirmQuestion(currentRef.questionNumber);
@@ -236,6 +250,28 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   ),
               ],
             ),
+    );
+  }
+
+  void _openChatSheet(ReferenceAnswer refAnswer) {
+    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
+    final rubricItem = task?.rubric.firstWhere(
+      (it) => it.questionNumber == refAnswer.questionNumber,
+      orElse: () => RubricItem(
+        questionNumber: refAnswer.questionNumber,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
+    );
+    final questionLabel =
+        (rubricItem != null && rubricItem.questionText.isNotEmpty)
+            ? rubricItem.questionText
+            : '第 ${refAnswer.questionNumber} 题';
+    ChatSheet.show(
+      context,
+      taskId: widget.taskId,
+      questionNumber: refAnswer.questionNumber,
+      questionLabel: questionLabel,
     );
   }
 
