@@ -325,11 +325,15 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       await runPool(task.rubric, maxConcurrency, (item, i) async {
         if (state[taskId]?.cancelRequested ?? false) return;
         try {
-          results[i] = await qwen.generateStrategy(
-            rubricItem: item,
-            questionPaperPaths: task.questionPaperPaths,
-            answerImagePaths: task.answerImagePaths,
-            totalQuestions: task.rubric.length,
+          results[i] = await _retryWithFeedback<ReferenceAnswer>(
+            taskId: taskId,
+            unitLabel: '第 ${item.questionNumber} 题',
+            action: () => qwen.generateStrategy(
+              rubricItem: item,
+              questionPaperPaths: task.questionPaperPaths,
+              answerImagePaths: task.answerImagePaths,
+              totalQuestions: task.rubric.length,
+            ),
           );
           _patch(taskId, (j) => j.copyWith(done: j.done + 1));
         } catch (e) {
