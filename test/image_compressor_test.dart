@@ -175,4 +175,48 @@ void main() {
       expect(ra, isNot(rb));
     });
   });
+
+  group('ImageCompressor.compressedPathFor — error fallback', () {
+    late Directory tmp;
+
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('yas_imgcomp_err_');
+    });
+
+    tearDown(() {
+      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+    });
+
+    test('corrupted file (not an image) → returns srcPath, no throw', () async {
+      final src = '${tmp.path}/not_an_image.png';
+      await File(src).writeAsString('this is not a png, just bytes');
+      final result = await ImageCompressor.compressedPathFor(src);
+      expect(result, src);
+    });
+
+    test('empty file → returns srcPath, no throw', () async {
+      final src = '${tmp.path}/empty.png';
+      await File(src).writeAsBytes(<int>[]);
+      final result = await ImageCompressor.compressedPathFor(src);
+      expect(result, src);
+    });
+
+    test('fallback does NOT pin a completed result in _inflight (next call retries)', () async {
+      // First call: file is corrupt → fallback to src.
+      // Second call: overwrite with a real PNG → must succeed (i.e. the
+      //   in-flight map should not have pinned a previously-failed result).
+      final src = '${tmp.path}/flap.png';
+      await File(src).writeAsString('garbage');
+      final first = await ImageCompressor.compressedPathFor(src);
+      expect(first, src);
+
+      final im = img.Image(width: 100, height: 100);
+      im.clear(img.ColorRgb8(10, 20, 30));
+      await File(src).writeAsBytes(img.encodePng(im));
+
+      final second = await ImageCompressor.compressedPathFor(src);
+      expect(second, isNot(src));
+      expect(File(second).existsSync(), isTrue);
+    });
+  });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:image/image.dart' as img;
@@ -20,9 +21,10 @@ class ImageCompressor {
   ImageCompressor._();
 
   /// Process-wide cache: same `srcPath` shared across concurrent callers
-  /// only triggers one decode. Stores `Future<String>` (not `String`) so
-  /// in-flight work is also deduped.
-  static final Map<String, Future<String>> _inflight = {};
+  /// only triggers one decode. Stored via a `Completer` so we can tell
+  /// whether a previous attempt is still in flight (dedup) or already
+  /// resolved (re-evaluate, in case the previous attempt fell back).
+  static final Map<String, Completer<String>> _inflight = {};
 
   /// Compute the on-disk cache path for [srcPath]. Naming rule: the
   /// relative path under `images/` (excluding the `images/` segment
@@ -60,15 +62,13 @@ class ImageCompressor {
   /// first call and reusing the cache on subsequent calls (in-process and
   /// cross-process). On any failure returns [srcPath] unchanged.
   static Future<String> compressedPathFor(String srcPath) async {
-    final existing = _inflight[srcPath];
-    if (existing != null) return existing;
+    final cached = _inflight[srcPath];
+    if (cached != null && !cached.isCompleted) return cached.future;
 
-    final fut = _doCompress(srcPath).whenComplete(() {
-      // Keep completed results in the map for the rest of the process;
-      // _doCompress handles failure by returning srcPath.
-    });
-    _inflight[srcPath] = fut;
-    return fut;
+    final completer = Completer<String>();
+    _inflight[srcPath] = completer;
+    _doCompress(srcPath).then(completer.complete, onError: completer.completeError);
+    return completer.future;
   }
 
   static Future<String> _doCompress(String srcPath) async {
