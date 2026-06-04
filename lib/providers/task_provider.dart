@@ -35,13 +35,26 @@ class TaskNotifier extends StateNotifier<TaskState> {
 
   // Serializes all persistence so parallel writers (e.g. background grading)
   // never overlap a TaskStore.save with another. Each save writes the latest
-  // full state, so coalesced writes still land the newest data.
+  // full state, so coalesced writes still land the newest data. On save
+  // failure the chain is reset so the next call can attempt a fresh save
+  // (without this, a single transient error would poison the chain and stop
+  // all future persistence until restart).
   Future<void> _persistChain = Future.value();
 
   Future<void> _persist() {
-    _persistChain = _persistChain
-        .then((_) => TaskStore.save(state.tasks, state.submissions));
-    return _persistChain;
+    final next = _persistChain
+        .then((_) => TaskStore.save(state.tasks, state.submissions))
+        .catchError((Object e, StackTrace s) {
+      // Reset the chain so the *next* call (not this one, which already
+      // failed) gets a fresh future. Log so the failure isn't silent.
+      _persistChain = Future.value();
+      // ignore: avoid_print
+      print('TaskStore.save failed; persistence chain reset: $e');
+      // ignore: avoid_redundant_argument_values
+      Error.throwWithStackTrace(e, s);
+    });
+    _persistChain = next;
+    return next;
   }
 
   Future<void> addTask(GradingTask task) async {
