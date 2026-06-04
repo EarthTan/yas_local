@@ -12,6 +12,7 @@ enum TaskCardKind {
   idle,
   strategyRunning,
   strategyDone,
+  strategyFailed,
   gradingRunning,
   gradingComplete,
   gradingIncomplete,
@@ -60,6 +61,12 @@ TaskCardStatus resolveTaskCardStatus({
     );
   }
   if (job != null && job.phase == JobPhase.failed && job.failedCount > 0) {
+    if (job.kind == JobKind.strategy) {
+      return TaskCardStatus(
+        TaskCardKind.strategyFailed,
+        '策略生成失败 ${job.failedCount} 题 · 点击重试',
+      );
+    }
     return TaskCardStatus(
       TaskCardKind.gradingFailed,
       '批改完成，${job.failedCount} 份失败 · 点击重试',
@@ -92,6 +99,7 @@ Color _statusColor(TaskCardKind kind) => switch (kind) {
   TaskCardKind.gradingComplete => Colors.green,
   TaskCardKind.strategyDone => Colors.green,
   TaskCardKind.gradingFailed => Colors.red,
+  TaskCardKind.strategyFailed => Colors.red,
   TaskCardKind.gradingIncomplete => Colors.orange,
   TaskCardKind.idle => Colors.black54,
 };
@@ -179,17 +187,23 @@ class HomeScreen extends ConsumerWidget {
                                   ],
                                 ],
                               ),
-                              trailing:
-                                  status.kind == TaskCardKind.gradingFailed
+                              trailing: status.kind ==
+                                          TaskCardKind.gradingFailed ||
+                                      status.kind == TaskCardKind.strategyFailed
                                   ? const Icon(Icons.refresh, color: Colors.red)
                                   : const Icon(Icons.chevron_right),
                               // A failed card promises "点击重试": tapping re-runs
-                              // grading (which targets only the non-done/failed
-                              // submissions). Other cards open the task.
+                              // the corresponding job (strategy or grading), which
+                              // targets only the unfinished units. Other cards open
+                              // the task.
                               onTap: status.kind == TaskCardKind.gradingFailed
                                   ? () => ref
                                         .read(jobQueueProvider.notifier)
                                         .startGrading(t.id)
+                                  : status.kind == TaskCardKind.strategyFailed
+                                  ? () => ref
+                                        .read(jobQueueProvider.notifier)
+                                        .startStrategy(t.id)
                                   : () => context.push('/tasks/${t.id}'),
                             );
                           },
