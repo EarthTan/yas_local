@@ -16,11 +16,13 @@ void main() {
         child: MaterialApp(home: DebugScreen()),
       ),
     );
-    expect(find.text('Qwen 调用'), findsOneWidget);
-    expect(find.text('事件'), findsOneWidget);
-    expect(find.text('状态'), findsOneWidget);
-    expect(find.text('JSON 解析'), findsOneWidget);
-    expect(find.text('统计'), findsOneWidget);
+    // Each tab label appears in the TabBar (and is mirrored in the body
+    // header added in M5), so we only require at least one match.
+    expect(find.text('Qwen 调用'), findsAtLeastNWidgets(1));
+    expect(find.text('事件'), findsAtLeastNWidgets(1));
+    expect(find.text('状态'), findsAtLeastNWidgets(1));
+    expect(find.text('JSON 解析'), findsAtLeastNWidgets(1));
+    expect(find.text('统计'), findsAtLeastNWidgets(1));
   });
 
   testWidgets('Qwen tab shows empty state when no calls', (tester) async {

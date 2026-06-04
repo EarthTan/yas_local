@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/debug_provider.dart';
 import '../../../providers/task_provider.dart';
 import '../../../services/debug/debug_service.dart';
+import '../../../services/debug/tab_constants.dart';
+import '_export_button.dart';
 
 class StateTab extends ConsumerWidget {
   const StateTab({super.key});
@@ -10,17 +12,65 @@ class StateTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final snap = ref.watch(debugProvider).stateSnapshot;
+    final exportData = <String, Object?>{
+      'tab': 'state',
+      'capturedAt': DateTime.now().toIso8601String(),
+      'snapshot': snap == null
+          ? null
+          : {
+              'capturedAt': snap.capturedAt.toIso8601String(),
+              'taskCount': snap.tasks.length,
+              'referenceCount': snap.references.length,
+              'tasks': snap.tasks.map((t) => (t as dynamic).toJson()).toList(),
+              'references': snap.references.map((r) => (r as dynamic).toJson()).toList(),
+              'settingsNote': 'apiKey redacted',
+            },
+    };
     if (snap == null) {
-      return const Center(
-        child: Text('暂无状态快照', style: TextStyle(color: Colors.black)),
+      return Column(
+        children: [
+          Row(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text('状态', style: Theme.of(context).textTheme.titleMedium),
+              ),
+              const Spacer(),
+              ExportButton(tab: kTabState, data: exportData),
+            ],
+          ),
+          const Divider(height: 1),
+          const Expanded(
+            child: Center(
+              child: Text('暂无状态快照', style: TextStyle(color: Colors.black)),
+            ),
+          ),
+        ],
       );
     }
-    return ListView(
-      padding: const EdgeInsets.all(8),
+    return Column(
       children: [
-        _settingsTile(snap),
-        const Divider(color: Colors.black26),
-        ..._taskTiles(snap),
+        Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('状态', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            const Spacer(),
+            ExportButton(tab: kTabState, data: exportData),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(8),
+            children: [
+              _settingsTile(snap),
+              const Divider(color: Colors.black26),
+              ..._taskTiles(snap),
+            ],
+          ),
+        ),
       ],
     );
   }

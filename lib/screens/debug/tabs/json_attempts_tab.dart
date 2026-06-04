@@ -2,21 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/debug_provider.dart';
 import '../../../services/debug/debug_service.dart';
+import '../../../services/debug/tab_constants.dart';
+import '_export_button.dart';
 
 class JsonAttemptsTab extends ConsumerWidget {
   const JsonAttemptsTab({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final attempts = ref.watch(debugProvider).jsonAttempts.reversed.toList();
-    if (attempts.isEmpty) {
-      return const Center(
-        child: Text('暂无 JSON 解析记录', style: TextStyle(color: Colors.black)),
-      );
-    }
-    return ListView.builder(
-      itemCount: attempts.length,
-      itemBuilder: (context, i) => _JsonAttemptRow(record: attempts[i]),
+    final debugState = ref.watch(debugProvider);
+    final attempts = debugState.jsonAttempts.reversed.toList();
+    final exportData = <String, Object?>{
+      'tab': 'json_attempts',
+      'capturedAt': DateTime.now().toIso8601String(),
+      'count': debugState.jsonAttempts.length,
+      'items': debugState.jsonAttempts.map((r) => r.toJson()).toList(),
+    };
+    return Column(
+      children: [
+        Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('JSON 解析', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            const Spacer(),
+            ExportButton(tab: kTabJsonAttempts, data: exportData),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: attempts.isEmpty
+              ? const Center(
+                  child: Text('暂无 JSON 解析记录', style: TextStyle(color: Colors.black)),
+                )
+              : ListView.builder(
+                  itemCount: attempts.length,
+                  itemBuilder: (context, i) => _JsonAttemptRow(record: attempts[i]),
+                ),
+        ),
+      ],
     );
   }
 }

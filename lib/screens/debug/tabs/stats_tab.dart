@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/debug_provider.dart';
 import '../../../services/debug/debug_service.dart';
 import '../../../services/debug/debug_stats.dart';
+import '../../../services/debug/tab_constants.dart';
+import '_export_button.dart';
 
 class StatsTab extends ConsumerWidget {
   const StatsTab({super.key});
@@ -14,14 +16,52 @@ class StatsTab extends ConsumerWidget {
     // the singleton service.
     ref.watch(debugProvider);
     final stats = DebugService.instance.stats.snapshot();
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    final exportData = <String, Object?>{
+      'tab': 'stats',
+      'capturedAt': DateTime.now().toIso8601String(),
+      'byScope': stats.byScope.map((k, v) => MapEntry(k.name, {
+            'calls': v.calls,
+            'ok': v.ok,
+            'httpError': v.httpError,
+            'parseError': v.parseError,
+            'otherError': v.otherError,
+            'totalMs': v.totalMs,
+            'maxMs': v.maxMs,
+            'p50Ms': v.p50Ms,
+            'p95Ms': v.p95Ms,
+          })),
+      'global': {
+        'totalCalls': stats.totalCalls,
+        'totalErrors': stats.totalErrors,
+        'totalVlmMs': stats.totalVlmMs,
+        'errorRate': stats.errorRate,
+      },
+    };
+    return Column(
       children: [
-        ...DebugScope.values
-            .where((s) => stats.byScope[s]!.calls > 0)
-            .map((s) => _ScopeCard(scope: s, snap: stats.byScope[s]!)),
-        const Divider(),
-        _GlobalCard(snap: stats),
+        Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('统计', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            const Spacer(),
+            ExportButton(tab: kTabStats, data: exportData),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              ...DebugScope.values
+                  .where((s) => stats.byScope[s]!.calls > 0)
+                  .map((s) => _ScopeCard(scope: s, snap: stats.byScope[s]!)),
+              const Divider(),
+              _GlobalCard(snap: stats),
+            ],
+          ),
+        ),
       ],
     );
   }

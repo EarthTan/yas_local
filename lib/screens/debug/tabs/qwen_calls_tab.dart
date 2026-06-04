@@ -2,21 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/debug_provider.dart';
 import '../../../services/debug/debug_service.dart';
+import '../../../services/debug/tab_constants.dart';
+import '_export_button.dart';
 
 class QwenCallsTab extends ConsumerWidget {
   const QwenCallsTab({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final calls = ref.watch(debugProvider).qwenCalls.reversed.toList();
-    if (calls.isEmpty) {
-      return const Center(
-        child: Text('暂无 Qwen 调用记录', style: TextStyle(color: Colors.black)),
-      );
-    }
-    return ListView.builder(
-      itemCount: calls.length,
-      itemBuilder: (context, i) => _QwenCallRow(record: calls[i]),
+    final debugState = ref.watch(debugProvider);
+    final calls = debugState.qwenCalls.reversed.toList();
+    final exportData = <String, Object?>{
+      'tab': 'qwen_calls',
+      'capturedAt': DateTime.now().toIso8601String(),
+      'count': debugState.qwenCalls.length,
+      'items': debugState.qwenCalls.map((r) => r.toJson()).toList(),
+    };
+    return Column(
+      children: [
+        Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('Qwen 调用', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            const Spacer(),
+            ExportButton(tab: kTabQwenCalls, data: exportData),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: calls.isEmpty
+              ? const Center(
+                  child: Text('暂无 Qwen 调用记录', style: TextStyle(color: Colors.black)),
+                )
+              : ListView.builder(
+                  itemCount: calls.length,
+                  itemBuilder: (context, i) => _QwenCallRow(record: calls[i]),
+                ),
+        ),
+      ],
     );
   }
 }
