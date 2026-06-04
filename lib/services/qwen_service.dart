@@ -374,64 +374,53 @@ class QwenService {
       'image_url': {'url': 'data:${_mimeType(compressedStudentPath)};base64,$studentB64'},
     });
 
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.gradePaper(strategyText: strategyText),
-              },
-            ],
-          }
-        ],
+    final userText = AppPrompts.gradePaper(strategyText: strategyText);
+
+    return _retryingRequest<List<QuestionGradeResult>>(
+      scope: 'grade',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
       },
-      options: Options(extra: {'_qwen_scope': 'grade'}),
-    );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireListWithReasoning(content,
-          fromKey: 'questions', scope: 'grade');
-      // reasoning 丢弃：批改的思考过程不暴露给学生/老师
-      return payload.list.map((q) {
-        final qNum = q['number'] is int
-            ? q['number'] as int
-            : int.tryParse(q['number'].toString()) ?? 0;
-        final cps = (q['checkpoints'] as List? ?? [])
-            .map((c) => CheckpointResult(
-                  description: (c['description'] ?? '').toString(),
-                  passed: c['passed'] as bool? ?? false,
-                  pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-                  reason: (c['reason'] ?? '').toString(),
-                ))
-            .toList();
-        return QuestionGradeResult(
-          questionNumber: qNum,
-          extractedAnswer: (q['extracted_answer'] ?? '').toString(),
-          checkpoints: cps,
-          confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
-          overallComment: q['overall_comment'] as String?,
+      extract: (content) {
+        final payload = JsonExtractor.requireListWithReasoning(
+          content,
+          fromKey: 'questions',
+          scope: 'grade',
         );
-      }).toList();
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'grade',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
-    }
+        // reasoning 丢弃：批改的思考过程不暴露给学生/老师
+        return payload.list.map((q) {
+          final qNum = q['number'] is int
+              ? q['number'] as int
+              : int.tryParse(q['number'].toString()) ?? 0;
+          final cps = (q['checkpoints'] as List? ?? [])
+              .map((c) => CheckpointResult(
+                    description: (c['description'] ?? '').toString(),
+                    passed: c['passed'] as bool? ?? false,
+                    pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
+                    reason: (c['reason'] ?? '').toString(),
+                  ))
+              .toList();
+          return QuestionGradeResult(
+            questionNumber: qNum,
+            extractedAnswer: (q['extracted_answer'] ?? '').toString(),
+            checkpoints: cps,
+            confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
+            overallComment: q['overall_comment'] as String?,
+          );
+        }).toList();
+      },
+    );
   }
 
   /// Retry policy for a single Qwen call. `bodyBuilder` is invoked on every
@@ -463,9 +452,9 @@ class QwenService {
       } catch (e) {
         final q = QwenError.from(e);
         // 4xx is a hard "stop" — no point retrying 401 / 403 / 404.
-        if (!q.shouldRetry) rethrow;
+        if (!q.shouldRetry) throw q;
         lastKind = q.kind;
-        if (attempt == maxAttempts - 1) rethrow;
+        if (attempt == maxAttempts - 1) throw q;
         final delay = _backoffMs(attempt);
         await Future<void>.delayed(Duration(milliseconds: delay));
       }

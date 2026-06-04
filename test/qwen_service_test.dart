@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/settings.dart';
 import 'package:yas_local/services/debug_service.dart';
-import 'package:yas_local/services/json_extractor.dart';
+import 'package:yas_local/services/qwen_error.dart';
 import 'package:yas_local/services/qwen_service.dart';
 
 class _MockAdapter implements HttpClientAdapter {
@@ -63,20 +63,20 @@ void main() {
     expect(calls.single.statusCode, 200);
   });
 
-  test('http error records a QwenCallRecord with status=httpError', () async {
+  test('http error records one QwenCallRecord per attempt (3 on a 5xx, all httpError)', () async {
     DebugService.instance.setEnabled(true);
     final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
     final svc = QwenService(s);
     svc.dio.httpClientAdapter = _MockAdapter(_errJson);
 
-    try {
-      await svc.identifyQuestions(const []);
-    } catch (_) {}
+    await expectLater(
+        () => svc.identifyQuestions(const []),
+        throwsA(predicate<QwenError>((e) => e.kind == QwenErrorKind.http5xx)));
 
     final calls = DebugService.instance.qwenCalls;
-    expect(calls, hasLength(1));
-    expect(calls.single.status, QwenCallStatus.httpError);
-    expect(calls.single.statusCode, 500);
+    expect(calls, hasLength(3), reason: 'one interceptor record per attempt');
+    expect(calls.every((c) => c.status == QwenCallStatus.httpError), isTrue);
+    expect(calls.every((c) => c.statusCode == 500), isTrue);
   });
 
   test('disabled service does not record', () async {
@@ -90,7 +90,7 @@ void main() {
     expect(DebugService.instance.qwenCalls, isEmpty);
   });
 
-  test('AI returns invalid JSON → records parseError + rethrows', () async {
+  test('AI returns invalid JSON 3x → throws QwenError(jsonParse) and records 3 ok calls', () async {
     DebugService.instance.setEnabled(true);
     final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
     final svc = QwenService(s);
@@ -103,14 +103,15 @@ void main() {
     });
 
     await expectLater(
-        () => svc.identifyQuestions(const []), throwsA(isA<JsonParseException>()));
+        () => svc.identifyQuestions(const []),
+        throwsA(predicate<QwenError>((e) => e.kind == QwenErrorKind.jsonParse)));
 
     final calls = DebugService.instance.qwenCalls;
-    // Expect at least one ok (from interceptor) AND one parseError (from the catch)
-    expect(calls.length, greaterThanOrEqualTo(2));
-    expect(calls.any((c) => c.status == QwenCallStatus.ok), isTrue);
-    expect(calls.last.status, QwenCallStatus.parseError);
-    expect(calls.last.errorMessage, contains('JsonParseException'));
+    // Per-attempt responses are recorded by the Dio interceptor. After 3
+    // failed parse attempts the helper throws QwenError — no extra
+    // "parseError" record from the old catch block.
+    expect(calls, hasLength(3), reason: 'one record per attempt');
+    expect(calls.every((c) => c.status == QwenCallStatus.ok), isTrue);
   });
 
   group('redactBase64Messages', () {
