@@ -184,54 +184,42 @@ class QwenService {
     }
 
     final countCtx = totalQuestions > 0 ? '（作业共有 $totalQuestions 道题）' : '';
-
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.generateStrategy(
-                  questionNumber: rubricItem.questionNumber,
-                  maxPoints: rubricItem.maxPoints,
-                  questionText: rubricItem.questionText,
-                  hasAnswerImages: answerImagePaths.isNotEmpty,
-                  countCtx: countCtx,
-                ),
-              },
-            ],
-          }
-        ],
-      },
-      options: Options(extra: {'_qwen_scope': 'strategy'}),
+    final userText = AppPrompts.generateStrategy(
+      questionNumber: rubricItem.questionNumber,
+      maxPoints: rubricItem.maxPoints,
+      questionText: rubricItem.questionText,
+      hasAnswerImages: answerImagePaths.isNotEmpty,
+      countCtx: countCtx,
     );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'strategy');
-      return _parseReferenceAnswer(
-        rubricItem.questionNumber,
-        payload.json,
-        reasoning: payload.reasoning,
-      );
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'strategy',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
-    }
+
+    return _retryingRequest<ReferenceAnswer>(
+      scope: 'strategy',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
+      },
+      extract: (content) {
+        final payload = JsonExtractor.requireObjectWithReasoning(
+          content,
+          scope: 'strategy',
+        );
+        return _parseReferenceAnswer(
+          rubricItem.questionNumber,
+          payload.json,
+          reasoning: payload.reasoning,
+        );
+      },
+    );
   }
 
   Future<ReferenceAnswer> refineStrategy({
