@@ -42,7 +42,12 @@ class StrategyReviewScreen extends ConsumerStatefulWidget {
 class _S extends ConsumerState<StrategyReviewScreen> {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
-  int _lastRefsLength = -1;
+  // Diagnostic listener: ref.listen can only run inside build, so we use
+  // ref.listenManual in initState and close the subscription in dispose.
+  // It logs refs.length transitions so we can detect a future regression
+  // where the list grows (the user reported such a regression, but no
+  // current code path can produce it — see the retryGenerate tests).
+  ProviderSubscription<StrategyState>? _refsSub;
 
   @override
   void initState() {
@@ -50,10 +55,25 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(strategyProvider.notifier).loadOrGenerate(widget.taskId);
     });
+    _refsSub = ref.listenManual<StrategyState>(
+      strategyProvider,
+      (prev, next) {
+        final prevLen = prev?.references.length;
+        final nextLen = next.references.length;
+        if (prevLen != nextLen) {
+          DebugService.instance.recordEvent(
+            scope: 'strategy / task:${widget.taskId}',
+            message: 'refs.length: $prevLen → $nextLen',
+            data: {'prev': prevLen, 'next': nextLen},
+          );
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
+    _refsSub?.close();
     _pageController.dispose();
     super.dispose();
   }
@@ -83,19 +103,6 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     final notifier = ref.read(strategyProvider.notifier);
     final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
     final refs = state.references;
-
-    // Diagnostic: user reported "重试此题 causes progress dots to grow".
-    // Current code provably cannot grow the list (see retryGenerate test),
-    // but if it ever does, this log will surface the change with a stack
-    // trace so we can see which call site mutated the list.
-    if (refs.length != _lastRefsLength) {
-      DebugService.instance.recordEvent(
-        scope: 'strategy / task:${widget.taskId}',
-        message: 'refs.length: $_lastRefsLength → ${refs.length}',
-        data: {'prev': _lastRefsLength, 'next': refs.length},
-      );
-      _lastRefsLength = refs.length;
-    }
 
     final isLast = _currentIndex >= refs.length - 1;
     final currentRef = refs.isEmpty ? null : refs[_currentIndex.clamp(0, refs.length - 1)];

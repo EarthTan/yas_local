@@ -848,7 +848,7 @@ void main() {
           checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
         ),
       ];
-      await _pumpChatSheet(tester, refs: refs);
+      final notifier = await _pumpChatSheet(tester, refs: refs);
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), '请增加一个 checkpoint');
       await tester.pump();
@@ -859,6 +859,11 @@ void main() {
       expect(sendBtn.onPressed, isNotNull);
       await tester.tap(find.byIcon(Icons.send));
       await tester.pump();
+      // sendMessage was actually called with the right args.
+      expect(notifier.sendMessageCallCount, 1);
+      expect(notifier.lastSentTaskId, 't1');
+      expect(notifier.lastSentQuestionNum, 1);
+      expect(notifier.lastSentMessage, '请增加一个 checkpoint');
       // Input cleared after send.
       final input = tester.widget<TextField>(find.byType(TextField));
       expect(input.controller!.text, isEmpty);
@@ -872,6 +877,10 @@ void main() {
 class _ChatSheetNotifier extends StrategyNotifier {
   _ChatSheetNotifier(super.ref, this._refs);
   final List<ReferenceAnswer> _refs;
+  int sendMessageCallCount = 0;
+  String? lastSentMessage;
+  String? lastSentTaskId;
+  int? lastSentQuestionNum;
 
   @override
   Future<void> loadOrGenerate(String taskId) async {}
@@ -880,19 +889,31 @@ class _ChatSheetNotifier extends StrategyNotifier {
   Future<void> saveAllConfirmed(String taskId) async {}
 
   @override
+  Future<void> sendMessage(String taskId, int questionNum, String message) async {
+    sendMessageCallCount++;
+    lastSentTaskId = taskId;
+    lastSentQuestionNum = questionNum;
+    lastSentMessage = message;
+  }
+
+  @override
   StrategyState get state => StrategyState(references: _refs);
 }
 
-Future<void> _pumpChatSheet(
+Future<_ChatSheetNotifier> _pumpChatSheet(
   WidgetTester tester, {
   required List<ReferenceAnswer> refs,
   int questionNumber = 1,
   String questionLabel = '第 1 题',
-}) {
-  return tester.pumpWidget(
+}) async {
+  late _ChatSheetNotifier notifier;
+  await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        strategyProvider.overrideWith((ref) => _ChatSheetNotifier(ref, refs)),
+        strategyProvider.overrideWith((ref) {
+          notifier = _ChatSheetNotifier(ref, refs);
+          return notifier;
+        }),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -905,4 +926,5 @@ Future<void> _pumpChatSheet(
       ),
     ),
   );
+  return notifier;
 }
