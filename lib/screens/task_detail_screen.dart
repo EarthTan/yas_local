@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../models/reference_answer.dart';
 import '../models/submission.dart';
+import '../providers/job_queue_provider.dart';
 import '../providers/task_provider.dart';
 import '../services/reference_store.dart';
 
@@ -189,7 +190,9 @@ class _S extends ConsumerState<TaskDetailScreen> {
               ],
               ResultsSectionStatus.readyToGrade => [
                 FilledButton.icon(
-                  onPressed: () => context.push('/tasks/${widget.taskId}/grading'),
+                  onPressed: () => ref
+                      .read(jobQueueProvider.notifier)
+                      .startGrading(widget.taskId),
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('开始批改'),
                 ),
@@ -254,10 +257,9 @@ class _S extends ConsumerState<TaskDetailScreen> {
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
             onPressed: () async {
               Navigator.of(ctx).pop();
-              final router = GoRouter.of(context);
               await ref.read(taskProvider.notifier).resetGradingResults(widget.taskId);
               if (!mounted) return;
-              router.push('/tasks/${widget.taskId}/grading');
+              ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
             },
             child: const Text('立即重批'),
           ),
