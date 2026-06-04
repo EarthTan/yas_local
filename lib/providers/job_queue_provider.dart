@@ -91,6 +91,12 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
     }
   }
 
+  /// 1-based position of [sub] in [targets] (the user-visible order on the
+  /// task card), independent of `runPool` processing order. O(n) but the
+  /// targets list is small and this runs once per unit.
+  int subIndexOf(List<Submission> targets, Submission sub) =>
+      targets.indexOf(sub);
+
   /// Removes a finished job so its card status reverts to derived/idle.
   void clear(String taskId) {
     if (_isRunning(taskId)) return;
@@ -172,11 +178,15 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
             sub.copyWith(status: SubmissionStatus.processing),
           );
 
-          final grades = await qwen.gradePaper(
-            imagePath: sub.imagePath!,
-            questionPaperPaths: task.questionPaperPaths,
-            rubric: task.rubric,
-            refs: references,
+          final grades = await _retryWithFeedback<List<QuestionGradeResult>>(
+            taskId: taskId,
+            unitLabel: '第 ${subIndexOf(targets, sub) + 1} 例',
+            action: () => qwen.gradePaper(
+              imagePath: sub.imagePath!,
+              questionPaperPaths: task.questionPaperPaths,
+              rubric: task.rubric,
+              refs: references,
+            ),
           );
           final gradeByNum = {for (final g in grades) g.questionNumber: g};
 
