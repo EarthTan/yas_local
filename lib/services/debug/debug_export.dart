@@ -43,6 +43,7 @@ class DebugExport {
     final h = dt.hour.toString().padLeft(2, '0');
     final mi = dt.minute.toString().padLeft(2, '0');
     final s = dt.second.toString().padLeft(2, '0');
-    return '$y$mo${d}_$h$mi$s';
+    final ms = dt.millisecond.toString().padLeft(3, '0');
+    return '$y$mo${d}_$h$mi${s}_$ms';
   }
 }
