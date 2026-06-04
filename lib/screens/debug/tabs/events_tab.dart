@@ -12,12 +12,12 @@ class EventsTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final debugState = ref.watch(debugProvider);
     final events = debugState.events.reversed.toList();
-    final exportData = <String, Object?>{
-      'tab': 'events',
-      'capturedAt': DateTime.now().toIso8601String(),
-      'count': debugState.events.length,
-      'items': debugState.events.map((r) => r.toJson()).toList(),
-    };
+    Map<String, Object?> exportData() => <String, Object?>{
+          'tab': 'events',
+          'capturedAt': DateTime.now().toIso8601String(),
+          'count': debugState.events.length,
+          'items': debugState.events.map((r) => r.toJson()).toList(),
+        };
     return Column(
       children: [
         Row(

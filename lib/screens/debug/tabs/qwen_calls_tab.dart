@@ -12,12 +12,12 @@ class QwenCallsTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final debugState = ref.watch(debugProvider);
     final calls = debugState.qwenCalls.reversed.toList();
-    final exportData = <String, Object?>{
-      'tab': 'qwen_calls',
-      'capturedAt': DateTime.now().toIso8601String(),
-      'count': debugState.qwenCalls.length,
-      'items': debugState.qwenCalls.map((r) => r.toJson()).toList(),
-    };
+    Map<String, Object?> exportData() => <String, Object?>{
+          'tab': 'qwen_calls',
+          'capturedAt': DateTime.now().toIso8601String(),
+          'count': debugState.qwenCalls.length,
+          'items': debugState.qwenCalls.map((r) => r.toJson()).toList(),
+        };
     return Column(
       children: [
         Row(

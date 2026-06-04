@@ -12,20 +12,20 @@ class StateTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final snap = ref.watch(debugProvider).stateSnapshot;
-    final exportData = <String, Object?>{
-      'tab': 'state',
-      'capturedAt': DateTime.now().toIso8601String(),
-      'snapshot': snap == null
-          ? null
-          : {
-              'capturedAt': snap.capturedAt.toIso8601String(),
-              'taskCount': snap.tasks.length,
-              'referenceCount': snap.references.length,
-              'tasks': snap.tasks.map((t) => (t as dynamic).toJson()).toList(),
-              'references': snap.references.map((r) => (r as dynamic).toJson()).toList(),
-              'settingsNote': 'apiKey redacted',
-            },
-    };
+    Map<String, Object?> exportData() => <String, Object?>{
+          'tab': 'state',
+          'capturedAt': DateTime.now().toIso8601String(),
+          'snapshot': snap == null
+              ? null
+              : {
+                  'capturedAt': snap.capturedAt.toIso8601String(),
+                  'taskCount': snap.tasks.length,
+                  'referenceCount': snap.references.length,
+                  'tasks': snap.tasks.map((t) => (t as dynamic).toJson()).toList(),
+                  'references': snap.references.map((r) => (r as dynamic).toJson()).toList(),
+                  'settingsNote': 'apiKey redacted',
+                },
+        };
     if (snap == null) {
       return Column(
         children: [

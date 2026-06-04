@@ -4,7 +4,7 @@ import '../../../services/debug/debug_export.dart';
 class ExportButton extends StatelessWidget {
   const ExportButton({super.key, required this.tab, required this.data});
   final String tab;
-  final Map<String, Object?> data;
+  final Map<String, Object?> Function() data;
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +17,7 @@ class ExportButton extends StatelessWidget {
 
   Future<void> _onPressed(BuildContext context) async {
     try {
-      final file = await DebugExport.writeJson(tab, data);
+      final file = await DebugExport.writeJson(tab, data());
       await DebugExport.reveal(file);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

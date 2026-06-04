@@ -16,27 +16,27 @@ class StatsTab extends ConsumerWidget {
     // the singleton service.
     ref.watch(debugProvider);
     final stats = DebugService.instance.stats.snapshot();
-    final exportData = <String, Object?>{
-      'tab': 'stats',
-      'capturedAt': DateTime.now().toIso8601String(),
-      'byScope': stats.byScope.map((k, v) => MapEntry(k.name, {
-            'calls': v.calls,
-            'ok': v.ok,
-            'httpError': v.httpError,
-            'parseError': v.parseError,
-            'otherError': v.otherError,
-            'totalMs': v.totalMs,
-            'maxMs': v.maxMs,
-            'p50Ms': v.p50Ms,
-            'p95Ms': v.p95Ms,
-          })),
-      'global': {
-        'totalCalls': stats.totalCalls,
-        'totalErrors': stats.totalErrors,
-        'totalVlmMs': stats.totalVlmMs,
-        'errorRate': stats.errorRate,
-      },
-    };
+    Map<String, Object?> exportData() => <String, Object?>{
+          'tab': 'stats',
+          'capturedAt': DateTime.now().toIso8601String(),
+          'byScope': stats.byScope.map((k, v) => MapEntry(k.name, {
+                'calls': v.calls,
+                'ok': v.ok,
+                'httpError': v.httpError,
+                'parseError': v.parseError,
+                'otherError': v.otherError,
+                'totalMs': v.totalMs,
+                'maxMs': v.maxMs,
+                'p50Ms': v.p50Ms,
+                'p95Ms': v.p95Ms,
+              })),
+          'global': {
+            'totalCalls': stats.totalCalls,
+            'totalErrors': stats.totalErrors,
+            'totalVlmMs': stats.totalVlmMs,
+            'errorRate': stats.errorRate,
+          },
+        };
     return Column(
       children: [
         Row(

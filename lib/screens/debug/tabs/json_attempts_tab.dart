@@ -12,12 +12,12 @@ class JsonAttemptsTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final debugState = ref.watch(debugProvider);
     final attempts = debugState.jsonAttempts.reversed.toList();
-    final exportData = <String, Object?>{
-      'tab': 'json_attempts',
-      'capturedAt': DateTime.now().toIso8601String(),
-      'count': debugState.jsonAttempts.length,
-      'items': debugState.jsonAttempts.map((r) => r.toJson()).toList(),
-    };
+    Map<String, Object?> exportData() => <String, Object?>{
+          'tab': 'json_attempts',
+          'capturedAt': DateTime.now().toIso8601String(),
+          'count': debugState.jsonAttempts.length,
+          'items': debugState.jsonAttempts.map((r) => r.toJson()).toList(),
+        };
     return Column(
       children: [
         Row(
