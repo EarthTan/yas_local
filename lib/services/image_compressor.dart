@@ -61,12 +61,19 @@ class ImageCompressor {
   /// Returns the path of a compressed copy of [srcPath], creating it on
   /// first call and reusing the cache on subsequent calls (in-process and
   /// cross-process). On any failure returns [srcPath] unchanged.
+  ///
+  /// A second call after a failed compress re-attempts the work — the
+  /// in-flight cache is not reused once a result has been resolved. Use
+  /// a fresh [srcPath] to force a different cache entry.
   static Future<String> compressedPathFor(String srcPath) async {
     final cached = _inflight[srcPath];
+    // Completer (not Future) is used so we can query isCompleted — Future
+    // has no such getter.
     if (cached != null && !cached.isCompleted) return cached.future;
 
     final completer = Completer<String>();
     _inflight[srcPath] = completer;
+    // onError is defense-in-depth: _doCompress never throws in practice.
     _doCompress(srcPath).then(completer.complete, onError: completer.completeError);
     return completer.future;
   }
