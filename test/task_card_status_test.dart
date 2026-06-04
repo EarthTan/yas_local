@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/job_state.dart';
 import 'package:yas_local/screens/home_screen.dart';
+import 'package:yas_local/services/qwen_error.dart';
 
 void main() {
   group('resolveTaskCardStatus', () {
@@ -126,6 +127,58 @@ void main() {
       );
       expect(s.kind, TaskCardKind.idle);
       expect(s.label, 'math · 3 份');
+    });
+
+    test('attempt>0 with kind -> retryHint contains the kind label', () {
+      final s = resolveTaskCardStatus(
+        job: const JobState(
+          taskId: 't1',
+          kind: JobKind.grading,
+          total: 5,
+          done: 2,
+        ),
+        subject: 'math',
+        subTotal: 5,
+        subDone: 0,
+        subFailed: 0,
+        retryAttempt: 2,
+        retryKind: QwenErrorKind.jsonParse,
+      );
+      expect(s.retryHint, contains('2/3'));
+      expect(s.retryHint, contains('JSON 解析错'));
+    });
+
+    test('attempt=0 -> retryHint is null', () {
+      final s = resolveTaskCardStatus(
+        job: const JobState(
+          taskId: 't1',
+          kind: JobKind.grading,
+          total: 5,
+          done: 2,
+        ),
+        subject: 'math',
+        subTotal: 5,
+        subDone: 0,
+        subFailed: 0,
+      );
+      expect(s.retryHint, isNull);
+    });
+
+    test('attempt>0 but kind null -> retryHint is null', () {
+      final s = resolveTaskCardStatus(
+        job: const JobState(
+          taskId: 't1',
+          kind: JobKind.grading,
+          total: 5,
+          done: 2,
+        ),
+        subject: 'math',
+        subTotal: 5,
+        subDone: 0,
+        subFailed: 0,
+        retryAttempt: 1,
+      );
+      expect(s.retryHint, isNull);
     });
   });
 }
