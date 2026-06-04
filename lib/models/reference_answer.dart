@@ -48,19 +48,31 @@ class ReferenceAnswer {
         'reasoning': reasoning,
       };
 
-  factory ReferenceAnswer.fromJson(Map<String, dynamic> json) => ReferenceAnswer(
-        questionNumber: json['questionNumber'] as int,
-        checkpoints: (json['checkpoints'] as List)
-            .map((e) => CheckpointDef.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        equivalentForms: (json['equivalentForms'] as List? ?? [])
-            .map((e) => e as String)
-            .toList(),
-        hasConsensus: json['hasConsensus'] as bool? ?? true,
-        confirmed: json['confirmed'] as bool? ?? false,
-        chatHistory: (json['chatHistory'] as List? ?? [])
-            .map((e) => StrategyMessage.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        reasoning: json['reasoning'] as String?,
-      );
+  factory ReferenceAnswer.fromJson(Map<String, dynamic> json) {
+    final qn = json['questionNumber'] as int;
+    final raw = ((json['checkpoints'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(CheckpointDef.fromJson)
+        .toList();
+    final checkpoints = [
+      for (var i = 0; i < raw.length; i++)
+        raw[i].id.isEmpty
+            ? raw[i].copyWith(id: 'q$qn-cp$i')
+            : raw[i],
+    ];
+    return ReferenceAnswer(
+      questionNumber: qn,
+      checkpoints: checkpoints,
+      equivalentForms: ((json['equivalentForms'] as List?) ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      hasConsensus: json['hasConsensus'] as bool? ?? true,
+      confirmed: json['confirmed'] as bool? ?? false,
+      chatHistory: ((json['chatHistory'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(StrategyMessage.fromJson)
+          .toList(),
+      reasoning: json['reasoning'] as String?,
+    );
+  }
 }

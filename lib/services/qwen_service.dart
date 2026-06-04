@@ -445,9 +445,12 @@ class QwenService {
     String? reasoning,
   }) {
     final checkpoints = (json['checkpoints'] as List? ?? [])
-        .map((c) => CheckpointDef(
-              description: (c['description'] ?? '').toString(),
-              points: (c['points'] as num?)?.toInt() ?? 1,
+        .asMap()
+        .entries
+        .map((entry) => CheckpointDef(
+              id: 'q$questionNumber-cp${entry.key}',
+              description: (entry.value['description'] ?? '').toString(),
+              points: (entry.value['points'] as num?)?.toInt() ?? 1,
             ))
         .toList();
     final equivalentForms = (json['equivalent_forms'] as List? ?? [])

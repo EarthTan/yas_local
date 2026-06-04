@@ -1,12 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
-import '../models/strategy_message.dart';
+import '../models/rubric.dart';
 import '../providers/strategy_provider.dart';
 import '../providers/task_provider.dart';
-import '../widgets/debug_entry_button.dart';
+import '../services/debug_service.dart';
+import 'strategy_review/bottom_action_bar.dart';
+import 'strategy_review/chat_sheet.dart';
+import 'strategy_review/edit_checkpoint_sheet.dart';
+import 'strategy_review/progress_dots.dart';
+import 'strategy_review/question_page.dart';
 
+/// The integration point of the strategy review flow (Phase 1 of grading).
+///
+/// Composes three sibling widgets: [ProgressDots] (header) → [PageView] of
+/// [QuestionPage] (body, one rubric item per page) → [BottomActionBar]
+/// (footer, refine / confirm / next).
+///
+/// Owns the [PageController] and the current-page index, and translates user
+/// gestures (tap checkpoint, add, retry, confirm) into calls on the
+/// [strategyProvider] notifier — sibling widgets stay purely presentational.
+///
+/// Renders one of three loading states before the page list is ready:
+/// `generating` (spinner + per-question progress), `error + empty refs`
+/// (red error block with a regenerate button), and `refs.isEmpty` (spinner).
+///
+/// When every reference is confirmed, an extra "完成" button appears under
+/// the action bar; tapping it calls [StrategyNotifier.saveAllConfirmed] and
+/// pops back to the task hub (`/tasks/:id`).
 class StrategyReviewScreen extends ConsumerStatefulWidget {
   final String taskId;
   const StrategyReviewScreen({super.key, required this.taskId});
@@ -16,458 +40,298 @@ class StrategyReviewScreen extends ConsumerStatefulWidget {
 }
 
 class _S extends ConsumerState<StrategyReviewScreen> {
+  final PageController _pageController = PageController();
+  int _currentIndex = 0;
+  // Diagnostic listener: ref.listen can only run inside build, so we use
+  // ref.listenManual in initState and close the subscription in dispose.
+  // It logs refs.length transitions so we can detect a future regression
+  // where the list grows (the user reported such a regression, but no
+  // current code path can produce it — see the retryGenerate tests).
+  ProviderSubscription<StrategyState>? _refsSub;
+
   @override
   void initState() {
     super.initState();
-    // Kick off loading/generation after first frame so the provider is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(strategyProvider.notifier).loadOrGenerate(widget.taskId);
     });
+    _refsSub = ref.listenManual<StrategyState>(
+      strategyProvider,
+      (prev, next) {
+        final prevLen = prev?.references.length;
+        final nextLen = next.references.length;
+        if (prevLen != nextLen) {
+          DebugService.instance.recordEvent(
+            scope: 'strategy / task:${widget.taskId}',
+            message: 'refs.length: $prevLen → $nextLen',
+            data: {'prev': prevLen, 'next': nextLen},
+          );
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _refsSub?.close();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _goTo(int index) {
+    if (!_pageController.hasClients) return;
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _nextUnconfirmed() {
+    final refs = ref.read(strategyProvider).references;
+    for (var i = 0; i < refs.length; i++) {
+      if (!refs[i].confirmed) {
+        _goTo(i);
+        return;
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(strategyProvider);
     final notifier = ref.read(strategyProvider.notifier);
+    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
+    final refs = state.references;
+
+    final isLast = _currentIndex >= refs.length - 1;
+    final currentRef = refs.isEmpty ? null : refs[_currentIndex.clamp(0, refs.length - 1)];
+
+    if (state.generating && refs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('批改策略')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text('正在生成第 ${state.genDone + 1}/${state.genTotal} 题的批改策略...'),
+              const SizedBox(height: 12),
+              if (state.genTotal > 0)
+                LinearProgressIndicator(value: state.genDone / state.genTotal),
+            ],
+          ),
+        ),
+      );
+    }
+    if (state.error != null && refs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('批改策略')),
+        body: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 48),
+              const SizedBox(height: 16),
+              SelectableText(state.error!,
+                  style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () => notifier.regenerate(widget.taskId),
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (refs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('批改策略')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('批改策略'),
+        title: Text('批改策略  ·  ${_currentIndex + 1}/${refs.length}'),
         actions: [
-          const DebugEntryButton(),
-          if (!state.generating && state.error == null && state.references.isNotEmpty)
+          if (refs.any((r) => !r.confirmed))
             TextButton(
-              onPressed: () {
-                notifier.confirmAll();
-              },
+              onPressed: notifier.confirmAll,
               child: const Text('全部确认'),
             ),
         ],
       ),
-      body: state.generating
-          ? _buildGenerating(state)
-          : state.error != null && state.references.isEmpty
-              ? _buildError(state, notifier)
-              : state.references.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : _buildReview(state, notifier),
-      bottomNavigationBar: (!state.generating && state.references.isNotEmpty)
-          ? _buildBottomBar(state, notifier)
-          : null,
-    );
-  }
-
-  Widget _buildGenerating(StrategyState state) {
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      body: Column(
         children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 24),
-          Text(
-            '正在生成第 ${state.genDone + 1}/${state.genTotal} 题的批改策略...',
-            style: const TextStyle(fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          LinearProgressIndicator(
-            value: state.genTotal > 0 ? state.genDone / state.genTotal : null,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildError(StrategyState state, StrategyNotifier notifier) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, color: Colors.red, size: 48),
-          const SizedBox(height: 16),
-          SelectableText(
-            state.error!,
-            style: const TextStyle(color: Colors.red),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: () => notifier.regenerate(widget.taskId),
-            icon: const Icon(Icons.refresh),
-            label: const Text('重试'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReview(StrategyState state, StrategyNotifier notifier) {
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-      itemCount: state.references.length,
-      itemBuilder: (_, i) => _QuestionCard(
-        taskId: widget.taskId,
-        reference: state.references[i],
-        isRefining: state.refining && state.refiningQuestion == state.references[i].questionNumber,
-        notifier: notifier,
-      ),
-    );
-  }
-
-  Widget _buildBottomBar(StrategyState state, StrategyNotifier notifier) {
-    final confirmed = state.confirmedCount;
-    final total = state.references.length;
-    final allDone = state.allConfirmed;
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (state.error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  '部分题目生成失败，可重新确认后继续',
-                  style: TextStyle(color: Colors.orange[700], fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            FilledButton.icon(
-              onPressed: allDone
-                  ? () async {
-                      await notifier.saveAllConfirmed(widget.taskId);
-                      if (mounted) {
-                        context.pushReplacement('/tasks/${widget.taskId}');
-                      }
-                    }
-                  : null,
-              icon: const Icon(Icons.check),
-              label: Text(allDone
-                  ? '完成'
-                  : '完成（$confirmed/$total 道题已确认）'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: ProgressDots(
+              count: refs.length,
+              currentIndex: _currentIndex,
+              confirmed: refs.map((r) => r.confirmed).toList(),
+              failed: refs.map((r) => r.checkpoints.isEmpty).toList(),
+              onTap: _goTo,
             ),
-          ],
-        ),
+          ),
+          Expanded(
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: refs.length,
+              onPageChanged: (i) => setState(() => _currentIndex = i),
+              itemBuilder: (_, i) {
+                final r = refs[i];
+                final rubricItem = task?.rubric.firstWhere(
+                  (it) => it.questionNumber == r.questionNumber,
+                  orElse: () => RubricItem(
+                    questionNumber: r.questionNumber,
+                    type: 'subjective',
+                    maxPoints: 0,
+                  ),
+                );
+                return QuestionPage(
+                  reference: r,
+                  maxPoints: rubricItem?.maxPoints ?? 0,
+                  questionType: rubricItem?.type == 'objective' ? '客观题' : '主观题',
+                  onEditCheckpoint: (id, cp) => _openEditSheet(r, id, cp),
+                  onAddCheckpoint: () => _openAddSheet(r),
+                  onRetry: () => notifier.retryGenerate(widget.taskId, r.questionNumber),
+                );
+              },
+            ),
+          ),
+        ],
       ),
+      bottomNavigationBar: currentRef == null
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (state.error != null)
+                  Container(
+                    width: double.infinity,
+                    color: Colors.orange.shade50,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Text(
+                      '部分题目生成失败，可重新确认后继续',
+                      style: TextStyle(color: Colors.orange[800], fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                BottomActionBar(
+                  confirmed: currentRef.confirmed,
+                  isLast: isLast,
+                  isRefining: state.refining && state.refiningQuestion == currentRef.questionNumber,
+                  onRefine: () => _openChatSheet(currentRef),
+                  onConfirm: () {
+                    if (currentRef.confirmed) {
+                      notifier.unconfirmQuestion(currentRef.questionNumber);
+                    } else {
+                      notifier.confirmQuestion(currentRef.questionNumber);
+                      HapticFeedback.lightImpact();
+                      _nextUnconfirmed();
+                    }
+                  },
+                  onNext: () {
+                    if (!isLast) _goTo(_currentIndex + 1);
+                  },
+                ),
+                if (state.allConfirmed)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        await notifier.saveAllConfirmed(widget.taskId);
+                        if (context.mounted) {
+                          context.pushReplacement('/tasks/${widget.taskId}');
+                        }
+                      },
+                      icon: const Icon(Icons.check),
+                      label: const Text('完成'),
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
-}
 
-class _QuestionCard extends ConsumerStatefulWidget {
-  final String taskId;
-  final ReferenceAnswer reference;
-  final bool isRefining;
-  final StrategyNotifier notifier;
-
-  const _QuestionCard({
-    required this.taskId,
-    required this.reference,
-    required this.isRefining,
-    required this.notifier,
-  });
-
-  @override
-  ConsumerState<_QuestionCard> createState() => _QCS();
-}
-
-class _QCS extends ConsumerState<_QuestionCard> {
-  bool _chatExpanded = false;
-  bool _thinkingExpanded = false;
-  final _controller = TextEditingController();
-  final _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final r = widget.reference;
+  void _openChatSheet(ReferenceAnswer refAnswer) {
     final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
     final rubricItem = task?.rubric.firstWhere(
-      (item) => item.questionNumber == r.questionNumber,
-      orElse: () => throw StateError('Rubric item not found'),
+      (it) => it.questionNumber == refAnswer.questionNumber,
+      orElse: () => RubricItem(
+        questionNumber: refAnswer.questionNumber,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
     );
+    final questionLabel =
+        (rubricItem != null && rubricItem.questionText.isNotEmpty)
+            ? rubricItem.questionText
+            : '第 ${refAnswer.questionNumber} 题';
+    ChatSheet.show(
+      context,
+      taskId: widget.taskId,
+      questionNumber: refAnswer.questionNumber,
+      questionLabel: questionLabel,
+    );
+  }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header row
-            Row(
-              children: [
-                Text(
-                  '第 ${r.questionNumber} 题',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(width: 8),
-                Chip(
-                  label: Text(rubricItem?.type == 'objective' ? '客观题' : '主观题',
-                      style: const TextStyle(fontSize: 11)),
-                  padding: EdgeInsets.zero,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                const Spacer(),
-                Text('${rubricItem?.maxPoints ?? 0} 分',
-                    style: TextStyle(color: Colors.grey[600])),
-              ],
-            ),
-            const SizedBox(height: 8),
+  int _rubricMaxPoints(int questionNumber) {
+    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
+    if (task == null) return 0;
+    final rubricItem = task.rubric.firstWhere(
+      (it) => it.questionNumber == questionNumber,
+      orElse: () => RubricItem(
+        questionNumber: questionNumber,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
+    );
+    return rubricItem.maxPoints;
+  }
 
-            // Checkpoints
-            if (r.checkpoints.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  '暂无批改策略（AI 未能生成，可通过对话描述要求）',
-                  style: TextStyle(color: Colors.orange[700], fontStyle: FontStyle.italic),
-                ),
-              )
-            else
-              ...r.checkpoints.map((c) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                        Expanded(child: Text(c.description)),
-                        const SizedBox(width: 8),
-                        Text('${c.points}分',
-                            style: TextStyle(
-                                color: Colors.blue[700], fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  )),
-
-            const SizedBox(height: 12),
-
-            // AI reasoning section
-            if (r.reasoning != null && r.reasoning!.isNotEmpty) ...[
-              InkWell(
-                onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
-                borderRadius: BorderRadius.circular(4),
-                child: Row(
-                  children: [
-                    Icon(
-                      _thinkingExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 18,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _thinkingExpanded ? '收起 AI 思考过程' : '查看 AI 思考过程',
-                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-              if (_thinkingExpanded)
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Text(
-                    r.reasoning!,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[800],
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 12),
-            ],
-
-            // Chat section toggle
-            InkWell(
-              onTap: () => setState(() => _chatExpanded = !_chatExpanded),
-              borderRadius: BorderRadius.circular(4),
-              child: Row(
-                children: [
-                  Icon(
-                    _chatExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    size: 18,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _chatExpanded ? '收起对话' : '修改策略',
-                    style: TextStyle(color: Colors.grey[700], fontSize: 13),
-                  ),
-                  if (r.chatHistory.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: Badge(
-                        label: Text('${r.chatHistory.length ~/ 2}'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            if (_chatExpanded) ...[
-              const SizedBox(height: 8),
-              _buildChat(r),
-            ],
-
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
-
-            // Confirm / unconfirm row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (!r.confirmed)
-                  FilledButton.icon(
-                    onPressed: widget.isRefining
-                        ? null
-                        : () => widget.notifier.confirmQuestion(r.questionNumber),
-                    icon: const Icon(Icons.check, size: 16),
-                    label: const Text('确认此题策略'),
-                    style: FilledButton.styleFrom(backgroundColor: Colors.green),
-                  )
-                else
-                  ActionChip(
-                    avatar: const Icon(Icons.check_circle, color: Colors.green, size: 16),
-                    label: const Text('已确认'),
-                    onPressed: () => widget.notifier.unconfirmQuestion(r.questionNumber),
-                    backgroundColor: Colors.green.shade50,
-                  ),
-              ],
-            ),
-          ],
-        ),
+  void _openEditSheet(ReferenceAnswer refAnswer, String id, CheckpointDef cp) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => EditCheckpointSheet(
+        mode: EditCheckpointMode.edit,
+        initialDescription: cp.description,
+        initialPoints: cp.points,
+        currentTotal:
+            refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points) - cp.points,
+        maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
+        onSave: (desc, points) {
+          ref.read(strategyProvider.notifier)
+              .editCheckpoint(refAnswer.questionNumber, id, description: desc, points: points);
+        },
+        onDelete: () {
+          ref.read(strategyProvider.notifier).removeCheckpoint(refAnswer.questionNumber, id);
+        },
       ),
     );
   }
 
-  Widget _buildChat(ReferenceAnswer r) {
-    return Column(
-      children: [
-        // Chat history
-        if (r.chatHistory.isNotEmpty)
-          Container(
-            constraints: const BoxConstraints(maxHeight: 200),
-            child: ListView.builder(
-              controller: _scrollController,
-              shrinkWrap: true,
-              itemCount: r.chatHistory.length,
-              itemBuilder: (_, i) => _ChatBubble(message: r.chatHistory[i]),
-            ),
-          ),
-
-        if (widget.isRefining)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 8),
-                Text('AI 回复中...', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              ],
-            ),
-          ),
-
-        // Input row
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                enabled: !widget.isRefining,
-                decoration: const InputDecoration(
-                  hintText: '描述修改要求，例如：第2个checkpoint改严格一些',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-                maxLines: null,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(r),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: widget.isRefining ? null : () => _send(r),
-              icon: const Icon(Icons.send, size: 18),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  void _send(ReferenceAnswer r) {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    _controller.clear();
-    widget.notifier.sendMessage(widget.taskId, r.questionNumber, text);
-    // Scroll to bottom after a brief delay
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-}
-
-class _ChatBubble extends StatelessWidget {
-  final StrategyMessage message;
-  const _ChatBubble({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    final isUser = message.role == 'user';
-    return Padding(
-      padding: EdgeInsets.only(
-        top: 4,
-        bottom: 4,
-        left: isUser ? 32 : 0,
-        right: isUser ? 0 : 32,
-      ),
-      child: Align(
-        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isUser ? Colors.blue.shade600 : Colors.grey.shade200,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            message.content,
-            style: TextStyle(
-              color: isUser ? Colors.white : Colors.black87,
-              fontSize: 13,
-            ),
-          ),
-        ),
+  void _openAddSheet(ReferenceAnswer refAnswer) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => EditCheckpointSheet(
+        mode: EditCheckpointMode.add,
+        initialDescription: '',
+        initialPoints: 1,
+        currentTotal: refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points),
+        maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
+        onSave: (desc, points) {
+          ref.read(strategyProvider.notifier)
+              .addCheckpoint(refAnswer.questionNumber, description: desc, points: points);
+        },
       ),
     );
   }
