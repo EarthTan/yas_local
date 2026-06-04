@@ -324,6 +324,51 @@ void main() {
       expect(snap.byScope[DebugScope.grade]!.calls, 1);
     });
   });
+
+  group('record display metadata', () {
+    test('QwenCallRecord.displayName maps known scopes', () {
+      expect(
+        QwenCallRecord(
+          timestamp: DateTime.now(),
+          scope: 'identify',
+          model: 'm',
+          endpoint: '/e',
+          statusCode: 200,
+          elapsedMs: 1,
+          status: QwenCallStatus.ok,
+          messages: const [],
+        ).displayName,
+        '题目识别',
+      );
+      expect(
+        QwenCallRecord(
+          timestamp: DateTime.now(),
+          scope: 'grade',
+          model: 'm',
+          endpoint: '/e',
+          statusCode: 200,
+          elapsedMs: 1,
+          status: QwenCallStatus.ok,
+          messages: const [],
+        ).displayName,
+        '批改',
+      );
+    });
+
+    test('QwenCallRecord.displayName falls back to scope string', () {
+      final r = QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'custom',
+        model: 'm',
+        endpoint: '/e',
+        statusCode: 200,
+        elapsedMs: 1,
+        status: QwenCallStatus.ok,
+        messages: const [],
+      );
+      expect(r.displayName, 'custom');
+    });
+  });
 }
 
 class _ThrowingSink implements DebugSink {

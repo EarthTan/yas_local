@@ -52,6 +52,14 @@ class QwenCallRecord implements DebugRecord {
   @override
   String get recordType => 'qwen_call';
 
+  String get displayName => switch (scope) {
+        'identify' => '题目识别',
+        'strategy' => '策略生成',
+        'refine' => '策略优化',
+        'grade' => '批改',
+        _ => scope,
+      };
+
   @override
   Map<String, Object?> toJson() => {
         'recordType': recordType,
