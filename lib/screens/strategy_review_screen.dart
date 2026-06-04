@@ -207,6 +207,18 @@ class _S extends ConsumerState<StrategyReviewScreen> {
               onTap: _goTo,
             ),
           ),
+          if (job != null && job.attempt > 0 && job.lastErrorKind != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Text(
+                '⟳ ${job.lastErrorUnit ?? "当前题"} · 重试 ${job.attempt}/3 · ${job.lastErrorKind!.displayName}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.deepOrange,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
           Expanded(
             child: PageView.builder(
               controller: _pageController,
@@ -241,6 +253,34 @@ class _S extends ConsumerState<StrategyReviewScreen> {
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (job != null &&
+                    (job.phase == JobPhase.done ||
+                        job.phase == JobPhase.failed) &&
+                    refs.where((r) => r.checkpoints.isEmpty).isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    color: Colors.red.shade50,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber, color: Colors.red, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${refs.where((r) => r.checkpoints.isEmpty).length} 题生成失败',
+                            style: const TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => _rerunFailedStrategyQuestions(),
+                          child: const Text('重跑失败题'),
+                        ),
+                      ],
+                    ),
+                  ),
                 // Bulk generation failures surface on the job (jobError); chat
                 // refine failures surface on state.error. Either drives the banner.
                 if (state.error != null || jobError != null)
@@ -395,5 +435,17 @@ class _S extends ConsumerState<StrategyReviewScreen> {
         },
       ),
     );
+  }
+
+  void _rerunFailedStrategyQuestions() async {
+    final refs = ref.read(strategyProvider).references;
+    final failedNums = refs
+        .where((r) => r.checkpoints.isEmpty)
+        .map((r) => r.questionNumber)
+        .toList();
+    if (failedNums.isEmpty) return;
+    await ref
+        .read(jobQueueProvider.notifier)
+        .startStrategy(widget.taskId, onlyQuestions: failedNums);
   }
 }
