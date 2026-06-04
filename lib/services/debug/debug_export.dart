@@ -20,7 +20,12 @@ class DebugExport {
 
   static Future<void> reveal(File file) async {
     if (Platform.isMacOS) {
-      await Process.run('open', ['-R', file.path]);
+      final result = await Process.run('open', ['-R', file.path]);
+      if (result.exitCode != 0) {
+        throw Exception(
+          'open -R failed (exitCode=${result.exitCode}): ${result.stderr}',
+        );
+      }
     } else if (Platform.isIOS) {
       await Share.shareXFiles(
         [XFile(file.path)],
