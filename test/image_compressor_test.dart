@@ -132,13 +132,17 @@ void main() {
       return f.path;
     }
 
-    test('in-flight: 10 concurrent calls → 1 decode, same cache file', () async {
+    test('concurrent callers all receive the same path (smoke, not a dedup proof)', () async {
       final src = await writePng('concurrent', 2000, 1500);
 
+      // Note: this test is a smoke test. It does not actually prove
+      // that only one decode happened — 10 concurrent callers would
+      // all return the same cachePath regardless of the in-flight
+      // map, since the cache is keyed by srcPath. The real dedup
+      // signal is the cross-process reuse test below.
       final results = await Future.wait(
         List.generate(10, (_) => ImageCompressor.compressedPathFor(src)),
       );
-      // All paths identical and equal to the cache path.
       final unique = results.toSet();
       expect(unique.length, 1);
       final cachePath = unique.first;
