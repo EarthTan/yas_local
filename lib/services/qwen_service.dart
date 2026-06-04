@@ -302,47 +302,36 @@ class QwenService {
       });
     }
 
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.identifyQuestions(),
-              },
-            ],
-          }
-        ],
+    final userText = AppPrompts.identifyQuestions();
+
+    return _retryingRequest<List<IdentifiedQuestion>>(
+      scope: 'identify',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
       },
-      options: Options(extra: {'_qwen_scope': 'identify'}),
+      extract: (content) {
+        final payload = JsonExtractor.requireListWithReasoning(
+          content,
+          fromKey: 'questions',
+          scope: 'identify',
+        );
+        // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
+        return payload.list
+            .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
+            .toList();
+      },
     );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireListWithReasoning(content,
-          fromKey: 'questions', scope: 'identify');
-      // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
-      return payload.list
-          .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
-          .toList();
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'identify',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
-    }
   }
 
   Future<List<QuestionGradeResult>> gradePaper({
