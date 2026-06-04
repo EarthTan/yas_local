@@ -210,6 +210,85 @@ void main() {
       expect(notifier.state.error, isNotNull);
     });
 
+    test('重试成功且全部题都恢复时 state.error 被清空（PR review #3 修复）', () async {
+      // 模拟：3 题中第 2 题原本失败（state.error 非空），用户点重试后
+      // 第 2 题恢复成功。期望 state.error 被清空，否则底部橙色
+      // "部分题目生成失败…" banner 会一直挂着。
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 5),
+      ]);
+      final container = ProviderContainer(overrides: [
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        settingsProvider.overrideWith((ref) => _FakeConfiguredSettingsNotifier()),
+        qwenFactoryProvider.overrideWithValue((ref) => _FakeSuccessfulQwenService()),
+      ]);
+      addTearDown(() => drainAndDispose(container));
+      final notifier = container.read(strategyProvider.notifier);
+      notifier.state = StrategyState(
+        error: '部分题目生成失败',
+        references: [
+          ReferenceAnswer(
+            questionNumber: 1,
+            checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          ),
+          const ReferenceAnswer(
+            questionNumber: 2,
+            checkpoints: [],
+            hasConsensus: false,
+          ),
+          ReferenceAnswer(
+            questionNumber: 3,
+            checkpoints: const [CheckpointDef(id: 'q3-cp0', description: 'C', points: 5)],
+          ),
+        ],
+      );
+      expect(notifier.state.error, '部分题目生成失败');
+
+      await notifier.retryGenerate('t1', 2);
+
+      // 关键断言：error 被清空。
+      expect(notifier.state.error, isNull);
+      // 仍然没有失败题（兜底断言）。
+      expect(notifier.state.references.any((r) => r.checkpoints.isEmpty), false);
+    });
+
+    test('重试成功但仍有其它失败题时 state.error 保留', () async {
+      // 3 题中第 1、2 题都失败（state.error 非空），用户点重试第 2 题
+      // 并成功。期望 state.error 仍保留，因为第 1 题还在失败。
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 5),
+      ]);
+      final container = ProviderContainer(overrides: [
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        settingsProvider.overrideWith((ref) => _FakeConfiguredSettingsNotifier()),
+        qwenFactoryProvider.overrideWithValue((ref) => _FakeSuccessfulQwenService()),
+      ]);
+      addTearDown(() => drainAndDispose(container));
+      final notifier = container.read(strategyProvider.notifier);
+      notifier.state = StrategyState(
+        error: '部分题目生成失败',
+        references: [
+          const ReferenceAnswer(questionNumber: 1, checkpoints: [], hasConsensus: false),
+          const ReferenceAnswer(questionNumber: 2, checkpoints: [], hasConsensus: false),
+          ReferenceAnswer(
+            questionNumber: 3,
+            checkpoints: const [CheckpointDef(id: 'q3-cp0', description: 'C', points: 5)],
+          ),
+        ],
+      );
+
+      await notifier.retryGenerate('t1', 2);
+
+      // error 必须保留：第 1 题还在失败。
+      expect(notifier.state.error, '部分题目生成失败');
+      expect(notifier.state.references[0].checkpoints, isEmpty);
+      expect(notifier.state.references[1].checkpoints, isNotEmpty);
+    });
+
     test('重试成功时 references 长度保持不变，失败项被替换为新结果', () async {
       // 3 题 rubric：第 1 题成功、第 2 题失败、第 3 题成功。
       // 模拟用户对失败的第 2 题点「重试此题」，

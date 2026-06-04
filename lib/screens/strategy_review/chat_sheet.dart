@@ -128,6 +128,12 @@ class _ChatSheetState extends ConsumerState<ChatSheet> {
     final isRefining =
         state.refining && state.refiningQuestion == widget.questionNumber;
     final messages = _currentMessages;
+    // ref.watch above rebuilds this widget on provider changes, but
+    // didUpdateWidget isn't fired in that case. Schedule a scroll on every
+    // build so that new messages from sendMessage / AI replies scroll the
+    // list to the bottom. _scrollIfMessagesChanged is a no-op when the
+    // message count hasn't changed.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollIfMessagesChanged());
 
     return Padding(
       padding: EdgeInsets.only(

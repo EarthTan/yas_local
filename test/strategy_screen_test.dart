@@ -621,6 +621,34 @@ void main() {
       expect(find.byType(EditCheckpointSheet), findsOneWidget);
     });
 
+    testWidgets('Edit sheet warning 以 rubric 满分为基准（PR review #1 修复）', (tester) async {
+      // PR review 反馈：之前 maxPoints 传入的是 checkpoints 当前合计，
+      // 应该是 rubric 的 RubricItem.maxPoints。
+      // 这个用例：rubric 满分 4，checkpoints 合计 3（1+1+1），
+      // 期望 sheet 显示「全部 checkpoint 分值合计 = 3（满分 4）」。
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 1),
+            CheckpointDef(id: 'q1-cp1', description: 'B', points: 1),
+            CheckpointDef(id: 'q1-cp2', description: 'C', points: 1),
+          ],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 4),
+      ]);
+      await _pumpScreen(tester, refs: refs, task: task);
+      // Open the edit sheet for checkpoint A (any of them works).
+      final row = find.ancestor(of: find.text('A'), matching: find.byType(InkWell));
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      // 关键断言：warning 文本应以 rubric 满分 4 为基准。
+      expect(find.textContaining('全部 checkpoint 分值合计 = 3'), findsOneWidget);
+      expect(find.textContaining('满分 4'), findsOneWidget);
+    });
+
     testWidgets('Edit sheet 保存 更新 description 并关闭 sheet', (tester) async {
       final refs = [
         ReferenceAnswer(
@@ -868,6 +896,45 @@ void main() {
       final input = tester.widget<TextField>(find.byType(TextField));
       expect(input.controller!.text, isEmpty);
     });
+
+    testWidgets('provider 推送新消息后 ListView 自动滚到底部（PR review #2 修复）',
+        (tester) async {
+      // 初始 20 条消息（会溢出测试视口）。
+      final initial = List.generate(
+        20,
+        (i) => StrategyMessage(
+          role: i.isEven ? 'user' : 'assistant',
+          content: '初始消息 $i',
+        ),
+      );
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          chatHistory: initial,
+        ),
+      ];
+      final notifier = await _pumpChatSheet(tester, refs: refs);
+      await tester.pumpAndSettle();
+      // 关键断言 1：初始就滚到底。
+      final listScrollable = find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Scrollable),
+      );
+      ScrollableState scrollable = tester.state<ScrollableState>(listScrollable);
+      expect(scrollable.position.pixels, scrollable.position.maxScrollExtent);
+
+      // 模拟 AI 回复追加了 5 条消息。
+      for (var i = 0; i < 5; i++) {
+        notifier.appendMessageForTest(
+          StrategyMessage(role: 'assistant', content: 'AI 回复 $i'),
+        );
+      }
+      await tester.pumpAndSettle();
+      // 关键断言 2：provider 变更后仍滚到底。
+      scrollable = tester.state<ScrollableState>(listScrollable);
+      expect(scrollable.position.pixels, scrollable.position.maxScrollExtent);
+    });
   });
 }
 
@@ -875,7 +942,9 @@ void main() {
 /// with no chat history. Lets us test the sheet's empty state and rendering
 /// without driving a full screen.
 class _ChatSheetNotifier extends StrategyNotifier {
-  _ChatSheetNotifier(super.ref, this._refs);
+  _ChatSheetNotifier(super.ref, this._refs) {
+    state = StrategyState(references: _refs);
+  }
   final List<ReferenceAnswer> _refs;
   int sendMessageCallCount = 0;
   String? lastSentMessage;
@@ -896,8 +965,16 @@ class _ChatSheetNotifier extends StrategyNotifier {
     lastSentMessage = message;
   }
 
-  @override
-  StrategyState get state => StrategyState(references: _refs);
+  /// Test-only: append a message to the first ref's chat history so we can
+  /// observe a provider-driven rebuild of [ChatSheet] (PR review #2).
+  void appendMessageForTest(StrategyMessage msg) {
+    final refs = state.references;
+    if (refs.isEmpty) return;
+    final updated = refs.first.copyWith(
+      chatHistory: [...refs.first.chatHistory, msg],
+    );
+    state = StrategyState(references: [updated, ...refs.sublist(1)]);
+  }
 }
 
 Future<_ChatSheetNotifier> _pumpChatSheet(

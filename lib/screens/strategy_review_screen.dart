@@ -282,6 +282,20 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     );
   }
 
+  int _rubricMaxPoints(int questionNumber) {
+    final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
+    if (task == null) return 0;
+    final rubricItem = task.rubric.firstWhere(
+      (it) => it.questionNumber == questionNumber,
+      orElse: () => RubricItem(
+        questionNumber: questionNumber,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
+    );
+    return rubricItem.maxPoints;
+  }
+
   void _openEditSheet(ReferenceAnswer refAnswer, String id, CheckpointDef cp) {
     showModalBottomSheet(
       context: context,
@@ -292,7 +306,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
         initialPoints: cp.points,
         currentTotal:
             refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points) - cp.points,
-        maxPoints: refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points),
+        maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
         onSave: (desc, points) {
           ref.read(strategyProvider.notifier)
               .editCheckpoint(refAnswer.questionNumber, id, description: desc, points: points);
@@ -313,7 +327,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
         initialDescription: '',
         initialPoints: 1,
         currentTotal: refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points),
-        maxPoints: refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points),
+        maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
         onSave: (desc, points) {
           ref.read(strategyProvider.notifier)
               .addCheckpoint(refAnswer.questionNumber, description: desc, points: points);

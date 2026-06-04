@@ -204,11 +204,23 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         for (final r in state.references)
           if (r.questionNumber == questionNumber) updated else r,
       ];
-      state = state.copyWith(
-        refining: false,
-        refiningQuestion: null,
-        references: newRefs,
-      );
+      // Clear a prior-phase error if every question now has at least one
+      // checkpoint (i.e., no references are still in the "failed" state).
+      // Otherwise the orange "部分题目生成失败…" banner would linger after
+      // the user successfully retried the last failing question.
+      final stillFailing = newRefs.any((r) => r.checkpoints.isEmpty);
+      state = stillFailing
+          ? state.copyWith(
+              refining: false,
+              refiningQuestion: null,
+              references: newRefs,
+            )
+          : state.copyWith(
+              refining: false,
+              refiningQuestion: null,
+              references: newRefs,
+              error: null,
+            );
       DebugService.instance.recordEvent(
         scope: 'task:$taskId / q:$questionNumber',
         message: 'retryGenerate 完成',
