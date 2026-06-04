@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/services/debug/debug_sink.dart';
 import 'package:yas_local/services/debug/in_memory_ring_sink.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
 
 void main() {
   test('DebugSink is an interface (cannot be instantiated directly)', () {

@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/settings.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/services/json_extractor.dart';
 import 'package:yas_local/services/qwen_service.dart';
 

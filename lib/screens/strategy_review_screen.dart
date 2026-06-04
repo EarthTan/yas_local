@@ -9,7 +9,7 @@ import '../models/rubric.dart';
 import '../providers/job_queue_provider.dart';
 import '../providers/strategy_provider.dart';
 import '../providers/task_provider.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 import 'strategy_review/bottom_action_bar.dart';
 import 'strategy_review/chat_sheet.dart';
 import 'strategy_review/edit_checkpoint_sheet.dart';

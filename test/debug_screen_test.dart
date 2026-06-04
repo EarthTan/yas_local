@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/screens/debug_screen.dart';
 
 void main() {

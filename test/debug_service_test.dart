@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
+import 'package:yas_local/services/debug/debug_sink.dart';
+import 'package:yas_local/services/debug/in_memory_ring_sink.dart';
 
 void main() {
   setUp(() {
@@ -261,4 +263,37 @@ void main() {
       expect(DebugService.instance.jsonAttempts, isEmpty);
     });
   });
+
+  group('withSinks factory', () {
+    test('forwards writes to all sinks', () {
+      final a = InMemoryRingSink();
+      final b = InMemoryRingSink();
+      final svc = DebugService.withSinks([a, b]);
+      svc.setEnabled(true);
+      svc.recordEvent(scope: 's', message: 'x');
+      expect(a.events, hasLength(1));
+      expect(b.events, hasLength(1));
+    });
+
+    test('sinks that throw do not break other sinks or the service', () {
+      final a = InMemoryRingSink();
+      final b = _ThrowingSink();
+      final svc = DebugService.withSinks([b, a]);
+      svc.setEnabled(true);
+      expect(() => svc.recordEvent(scope: 's', message: 'x'), returnsNormally);
+      expect(a.events, hasLength(1));
+    });
+  });
+}
+
+class _ThrowingSink implements DebugSink {
+  @override
+  void write(DebugRecord record) {
+    throw Exception('disk full');
+  }
+
+  @override
+  Future<void> flush() async {}
+  @override
+  Future<void> close() async {}
 }

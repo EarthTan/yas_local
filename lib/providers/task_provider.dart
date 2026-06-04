@@ -3,7 +3,7 @@ import '../models/task.dart';
 import '../models/submission.dart';
 import '../models/rubric.dart';
 import '../providers/settings_provider.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 import '../services/task_store.dart';
 
 class TaskState {

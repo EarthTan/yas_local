@@ -1,4 +1,4 @@
-import '../debug_service.dart';
+import 'debug_service.dart';
 import 'debug_sink.dart';
 
 class InMemoryRingSink implements DebugSink {
@@ -49,4 +49,10 @@ class InMemoryRingSink implements DebugSink {
 
   @override
   Future<void> close() async {}
+
+  void clear() {
+    _qwenCalls.clear();
+    _events.clear();
+    _jsonAttempts.clear();
+  }
 }

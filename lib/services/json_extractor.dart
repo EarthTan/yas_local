@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'debug_service.dart';
+import 'debug/debug_service.dart';
 
 /// Thrown when AI response text cannot be parsed into the expected JSON shape.
 class JsonParseException implements Exception {

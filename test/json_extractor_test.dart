@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/services/json_extractor.dart';
 
 void main() {

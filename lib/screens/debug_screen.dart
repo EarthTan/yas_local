@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/debug_provider.dart';
 import '../providers/task_provider.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 
 class DebugScreen extends ConsumerWidget {
   const DebugScreen({super.key});

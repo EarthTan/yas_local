@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/identified_question.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
 import 'settings_provider.dart';

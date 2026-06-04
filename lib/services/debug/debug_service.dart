@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-import 'debug/debug_sink.dart';
+import 'debug_sink.dart';
+import 'in_memory_ring_sink.dart';
 
 /// Status of a Qwen HTTP call as observed by DebugService.
 enum QwenCallStatus {
@@ -129,9 +130,16 @@ class _DebugNotifier extends ChangeNotifier {
 }
 
 class DebugService {
-  DebugService._();
+  /// Build a [DebugService] backed by the given [sinks]. Use this from
+  /// tests to inject custom sinks; production uses [instance] which is
+  /// pre-wired with a single [InMemoryRingSink].
+  factory DebugService.withSinks(List<DebugSink> sinks) {
+    return DebugService._fromSinks(sinks);
+  }
 
-  static final DebugService instance = DebugService._();
+  DebugService._fromSinks(this._sinks);
+
+  static final DebugService instance = DebugService.withSinks([InMemoryRingSink()]);
 
   static const int qwenCapacity = 200;
   static const int eventCapacity = 1000;
@@ -150,14 +158,14 @@ class DebugService {
   _DebugNotifier _changes = _DebugNotifier();
   Listenable get changes => _changes;
 
-  final List<QwenCallRecord> _qwenCalls = <QwenCallRecord>[];
-  final List<EventRecord> _events = <EventRecord>[];
-  final List<JsonAttemptRecord> _jsonAttempts = <JsonAttemptRecord>[];
+  List<DebugSink> _sinks = const [];
+  InMemoryRingSink? get _memorySink =>
+      _sinks.whereType<InMemoryRingSink>().firstOrNull;
   StateSnapshot? _stateSnapshot;
 
-  List<QwenCallRecord> get qwenCalls => List.unmodifiable(_qwenCalls);
-  List<EventRecord> get events => List.unmodifiable(_events);
-  List<JsonAttemptRecord> get jsonAttempts => List.unmodifiable(_jsonAttempts);
+  List<QwenCallRecord> get qwenCalls => _memorySink?.qwenCalls ?? const [];
+  List<EventRecord> get events => _memorySink?.events ?? const [];
+  List<JsonAttemptRecord> get jsonAttempts => _memorySink?.jsonAttempts ?? const [];
   StateSnapshot? get stateSnapshot => _stateSnapshot;
 
   void setEnabled(bool value) {
@@ -166,11 +174,7 @@ class DebugService {
 
   void recordQwenCall(QwenCallRecord record) {
     if (!_enabled) return;
-    _qwenCalls.add(record);
-    if (_qwenCalls.length > qwenCapacity) {
-      _qwenCalls.removeAt(0);
-    }
-    _changes.notify();
+    _dispatch(record);
   }
 
   void recordEvent({
@@ -180,24 +184,27 @@ class DebugService {
     Map<String, Object?>? data,
   }) {
     if (!_enabled) return;
-    _events.add(EventRecord(
+    _dispatch(EventRecord(
       timestamp: DateTime.now(),
       scope: scope,
       level: level,
       message: message,
       data: data,
     ));
-    if (_events.length > eventCapacity) {
-      _events.removeAt(0);
-    }
-    _changes.notify();
   }
 
   void recordJsonAttempt(JsonAttemptRecord record) {
     if (!_enabled) return;
-    _jsonAttempts.add(record);
-    if (_jsonAttempts.length > jsonAttemptCapacity) {
-      _jsonAttempts.removeAt(0);
+    _dispatch(record);
+  }
+
+  void _dispatch(DebugRecord record) {
+    for (final sink in _sinks) {
+      try {
+        sink.write(record);
+      } catch (_) {
+        // Sinks must not throw, but be defensive.
+      }
     }
     _changes.notify();
   }
@@ -218,9 +225,7 @@ class DebugService {
   }
 
   void clear() {
-    _qwenCalls.clear();
-    _events.clear();
-    _jsonAttempts.clear();
+    _memorySink?.clear();
     _stateSnapshot = null;
   }
 
@@ -233,6 +238,9 @@ class DebugService {
     _changes.dispose();
     _changes = _DebugNotifier();
     clear();
+    if (identical(this, instance)) {
+      _sinks = [InMemoryRingSink()];
+    }
   }
 }
 
