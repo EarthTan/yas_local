@@ -33,8 +33,16 @@ class TaskNotifier extends StateNotifier<TaskState> {
     _refreshDebugSnapshot();
   }
 
-  Future<void> _persist() async =>
-      TaskStore.save(state.tasks, state.submissions);
+  // Serializes all persistence so parallel writers (e.g. background grading)
+  // never overlap a TaskStore.save with another. Each save writes the latest
+  // full state, so coalesced writes still land the newest data.
+  Future<void> _persistChain = Future.value();
+
+  Future<void> _persist() {
+    _persistChain = _persistChain
+        .then((_) => TaskStore.save(state.tasks, state.submissions));
+    return _persistChain;
+  }
 
   Future<void> addTask(GradingTask task) async {
     state = state.copyWith(tasks: [...state.tasks, task]);
