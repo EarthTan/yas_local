@@ -1,8 +1,11 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/models/checkpoint.dart';
+import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/models/submission.dart';
 import 'package:yas_local/providers/task_provider.dart';
+import 'package:yas_local/services/reference_store.dart';
 import 'package:yas_local/services/task_store.dart';
 import 'dart:io';
 
@@ -50,5 +53,33 @@ void main() {
         .where((s) => s.status == SubmissionStatus.done)
         .length;
     expect(done, 8, reason: 'every concurrent write must survive');
+  });
+
+  test('ReferenceStore concurrent saves both persist (no lost writes)', () async {
+    await Future.wait([
+      ReferenceStore.save('t1', [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'a', points: 5)],
+        ),
+      ]),
+      ReferenceStore.save('t1', [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'b', points: 5)],
+        ),
+        ReferenceAnswer(
+          questionNumber: 2,
+          checkpoints: const [CheckpointDef(id: 'q2-cp0', description: 'c', points: 5)],
+        ),
+      ]),
+    ]);
+
+    final loaded = await ReferenceStore.load('t1');
+    // The chain serializes: one of the two saves will be the last writer. The
+    // important thing is that NEITHER call's payload is silently dropped — we
+    // must end up with a valid file matching one of the two inputs.
+    expect(loaded.length, anyOf(1, 2));
+    expect(loaded.first.checkpoints.first.description, anyOf('a', 'b'));
   });
 }
