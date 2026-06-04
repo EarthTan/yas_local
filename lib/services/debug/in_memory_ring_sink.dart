@@ -6,35 +6,42 @@ class InMemoryRingSink implements DebugSink {
     this.qwenCapacity = 200,
     this.eventCapacity = 1000,
     this.jsonAttemptCapacity = 200,
-  });
+  }) {
+    assert(qwenCapacity >= 1, 'qwenCapacity must be >= 1');
+    assert(eventCapacity >= 1, 'eventCapacity must be >= 1');
+    assert(jsonAttemptCapacity >= 1, 'jsonAttemptCapacity must be >= 1');
+  }
 
   final int qwenCapacity;
   final int eventCapacity;
   final int jsonAttemptCapacity;
 
-  final List<QwenCallRecord> qwenCalls = [];
-  final List<EventRecord> events = [];
-  final List<JsonAttemptRecord> jsonAttempts = [];
+  final List<QwenCallRecord> _qwenCalls = <QwenCallRecord>[];
+  final List<EventRecord> _events = <EventRecord>[];
+  final List<JsonAttemptRecord> _jsonAttempts = <JsonAttemptRecord>[];
+
+  List<QwenCallRecord> get qwenCalls => List.unmodifiable(_qwenCalls);
+  List<EventRecord> get events => List.unmodifiable(_events);
+  List<JsonAttemptRecord> get jsonAttempts => List.unmodifiable(_jsonAttempts);
 
   @override
   void write(DebugRecord record) {
     if (record is QwenCallRecord) {
-      qwenCalls.add(record);
-      if (qwenCalls.length > qwenCapacity) {
-        qwenCalls.removeAt(0);
+      _qwenCalls.add(record);
+      if (_qwenCalls.length > qwenCapacity) {
+        _qwenCalls.removeAt(0);
       }
     } else if (record is EventRecord) {
-      events.add(record);
-      if (events.length > eventCapacity) {
-        events.removeAt(0);
+      _events.add(record);
+      if (_events.length > eventCapacity) {
+        _events.removeAt(0);
       }
     } else if (record is JsonAttemptRecord) {
-      jsonAttempts.add(record);
-      if (jsonAttempts.length > jsonAttemptCapacity) {
-        jsonAttempts.removeAt(0);
+      _jsonAttempts.add(record);
+      if (_jsonAttempts.length > jsonAttemptCapacity) {
+        _jsonAttempts.removeAt(0);
       }
     }
-    // Unknown record type: silently ignore (forward compat).
   }
 
   @override
