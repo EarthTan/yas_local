@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'debug/debug_sink.dart';
+
 /// Status of a Qwen HTTP call as observed by DebugService.
 enum QwenCallStatus {
   /// HTTP 2xx, response received and parsed successfully.
@@ -17,7 +19,8 @@ enum EventLevel { info, warn, error }
 
 /// One Qwen HTTP call. Captured by the Dio interceptor in QwenService
 /// (status ok/httpError) and by the calling method's try/catch (status parseError).
-class QwenCallRecord {
+class QwenCallRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope; // 'identify' | 'strategy' | 'refine' | 'grade'
   final String model;
@@ -43,10 +46,14 @@ class QwenCallRecord {
     this.reasoningContent,
     this.errorMessage,
   });
+
+  @override
+  String get recordType => 'qwen_call';
 }
 
 /// One process event from a provider (identification / strategy / grading).
-class EventRecord {
+class EventRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope;
   final EventLevel level;
@@ -60,6 +67,9 @@ class EventRecord {
     required this.message,
     this.data,
   });
+
+  @override
+  String get recordType => 'event';
 }
 
 /// A single parsing attempt within JsonExtractor.
@@ -76,7 +86,8 @@ class JsonAttempt {
 }
 
 /// One JSON extraction. Contains all attempts and a snippet of the input.
-class JsonAttemptRecord {
+class JsonAttemptRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope;
   final String inputSnippet; // first 200 chars of the raw AI response
@@ -90,6 +101,9 @@ class JsonAttemptRecord {
     required this.attempts,
     this.finalException,
   });
+
+  @override
+  String get recordType => 'json_attempt';
 }
 
 /// Snapshot of in-memory app state. Refreshed by TaskNotifier / SettingsNotifier.
