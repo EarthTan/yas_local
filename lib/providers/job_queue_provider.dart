@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/checkpoint.dart';
 import '../models/job_state.dart';
+import '../models/reference_answer.dart';
 import '../models/submission.dart';
 import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
@@ -223,6 +224,97 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
     DebugService.instance.recordEvent(
       scope: 'task:$taskId',
       message: 'grading 结束',
+    );
+  }
+
+  Future<void> startStrategy(String taskId) async {
+    if (_isRunning(taskId)) return;
+
+    final settings = ref.read(settingsProvider);
+    final task = ref.read(taskProvider.notifier).taskById(taskId);
+    if (task == null || task.rubric.isEmpty) return;
+
+    if (!settings.isConfigured) {
+      _set(
+        taskId,
+        JobState(
+          taskId: taskId,
+          kind: JobKind.strategy,
+          phase: JobPhase.failed,
+          error: '未配置 API Key，请先到设置填写',
+        ),
+      );
+      return;
+    }
+
+    _set(
+      taskId,
+      JobState(
+        taskId: taskId,
+        kind: JobKind.strategy,
+        total: task.rubric.length,
+        done: 0,
+      ),
+    );
+
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'strategy generate 开始（${task.rubric.length} 题）',
+    );
+
+    final qwen = _newQwen();
+    final results = List<ReferenceAnswer?>.filled(task.rubric.length, null);
+
+    try {
+      await runPool(task.rubric, maxConcurrency, (item, i) async {
+        if (state[taskId]?.cancelRequested ?? false) return;
+        try {
+          results[i] = await qwen.generateStrategy(
+            rubricItem: item,
+            questionPaperPaths: task.questionPaperPaths,
+            answerImagePaths: task.answerImagePaths,
+            totalQuestions: task.rubric.length,
+          );
+          _patch(taskId, (j) => j.copyWith(done: j.done + 1));
+        } catch (e) {
+          results[i] = ReferenceAnswer(
+            questionNumber: item.questionNumber,
+            checkpoints: const [],
+            hasConsensus: false,
+          );
+          _patch(taskId, (j) {
+            final err = j.error ?? ErrorFormatter.format(e);
+            return j.copyWith(
+              done: j.done + 1,
+              failedCount: j.failedCount + 1,
+              error: err,
+            );
+          });
+        }
+      });
+
+      // Skip slots left null by a cancel, then persist the whole batch once.
+      final refs = [for (final r in results) ?r];
+      await ReferenceStore.save(taskId, refs);
+
+      _patch(taskId, (j) {
+        final phase = j.failedCount > 0 ? JobPhase.failed : JobPhase.done;
+        return j.copyWith(phase: phase);
+      });
+    } catch (e) {
+      // e.g. ReferenceStore.save failure — still reach a terminal phase so
+      // _isRunning doesn't stay true and block regeneration.
+      _patch(
+        taskId,
+        (j) => j.copyWith(
+          phase: JobPhase.failed,
+          error: j.error ?? ErrorFormatter.format(e),
+        ),
+      );
+    }
+    DebugService.instance.recordEvent(
+      scope: 'task:$taskId',
+      message: 'strategy generate 结束',
     );
   }
 }

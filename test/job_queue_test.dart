@@ -14,6 +14,7 @@ import 'package:yas_local/providers/settings_provider.dart';
 import 'package:yas_local/providers/strategy_provider.dart';
 import 'package:yas_local/providers/task_provider.dart';
 import 'package:yas_local/services/qwen_service.dart';
+import 'package:yas_local/services/reference_store.dart';
 
 GradingTask _gradingTask() => GradingTask(
   id: 't1',
@@ -118,6 +119,42 @@ class _CancelOnFirstQwen extends QwenService {
     ];
   }
 }
+
+class _StrategyOkQwen extends QwenService {
+  _StrategyOkQwen() : super(const AppSettings(apiKey: 'k'));
+  int calls = 0;
+  @override
+  Future<ReferenceAnswer> generateStrategy({
+    required RubricItem rubricItem,
+    required List<String> questionPaperPaths,
+    required List<String> answerImagePaths,
+    int totalQuestions = 0,
+  }) async {
+    calls++;
+    return ReferenceAnswer(
+      questionNumber: rubricItem.questionNumber,
+      checkpoints: [
+        CheckpointDef(
+          id: 'q${rubricItem.questionNumber}-cp0',
+          description: 'cp',
+          points: 5,
+        ),
+      ],
+    );
+  }
+}
+
+GradingTask _twoQuestionTask() => GradingTask(
+  id: 't1',
+  name: 'T1',
+  subject: 'math',
+  createdAt: DateTime(2026),
+  rubric: const [
+    RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+    RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 5),
+  ],
+  questionPaperPaths: const [],
+);
 
 typedef _GradeSetup = ({ProviderContainer container, _FakeTaskNotifier fake});
 
@@ -378,6 +415,42 @@ void main() {
         reason: 'only the first unit grades; cancel skips the rest',
       );
       expect(container.read(jobQueueProvider)['t1']!.done, 1);
+    });
+  });
+
+  group('JobQueueNotifier.startStrategy', () {
+    late Directory tmp;
+    setUp(() async {
+      tmp = await Directory.systemTemp.createTemp('jobq_strat_');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (call) async => tmp.path,
+          );
+    });
+    tearDown(() async {
+      if (await tmp.exists()) await tmp.delete(recursive: true);
+    });
+
+    test('generates all rubric items and persists to ReferenceStore', () async {
+      final qwen = _StrategyOkQwen();
+      final s = _gradeSetup(
+        task: _twoQuestionTask(),
+        subs: const [],
+        qwen: qwen,
+      );
+
+      await s.container.read(jobQueueProvider.notifier).startStrategy('t1');
+
+      expect(qwen.calls, 2);
+      final job = s.container.read(jobQueueProvider)['t1']!;
+      expect(job.kind, JobKind.strategy);
+      expect(job.done, 2);
+      expect(job.phase, JobPhase.done);
+
+      final saved = await ReferenceStore.load('t1');
+      expect(saved.length, 2);
+      expect(saved.every((r) => r.checkpoints.isNotEmpty), isTrue);
     });
   });
 }
