@@ -70,7 +70,7 @@ void main() {
   test('500 x 3: throws QwenError(http5xx)', () async {
     final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
     final svc = QwenService(s);
-    final a = _CountingAdapter((_, __) => _status500());
+    final a = _CountingAdapter((_, _) => _status500());
     svc.dio.httpClientAdapter = a;
 
     await expectLater(
@@ -83,7 +83,7 @@ void main() {
   test('401: throws immediately, no retry', () async {
     final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
     final svc = QwenService(s);
-    final a = _CountingAdapter((_, __) => _status401());
+    final a = _CountingAdapter((_, _) => _status401());
     svc.dio.httpClientAdapter = a;
 
     await expectLater(

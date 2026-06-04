@@ -2,7 +2,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:io';
-import 'package:yas_local/models/checkpoint.dart';
 import 'package:yas_local/models/job_state.dart';
 import 'package:yas_local/models/reference_answer.dart';
 import 'package:yas_local/models/rubric.dart';
