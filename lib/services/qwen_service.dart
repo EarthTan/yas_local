@@ -8,6 +8,7 @@ import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
 import 'debug_service.dart';
+import 'image_compressor.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';
 
@@ -153,8 +154,11 @@ class QwenService {
   }) async {
     final imageContent = <Map<String, dynamic>>[];
 
-    // Send question paper images first
-    for (final path in questionPaperPaths) {
+    // Send question paper images first (compressed for VLM).
+    final compressedQuestionPaths = await Future.wait(
+      questionPaperPaths.map(ImageCompressor.compressedPathFor),
+    );
+    for (final path in compressedQuestionPaths) {
       final bytes = await File(path).readAsBytes();
       final b64 = base64Encode(bytes);
       imageContent.add({
@@ -163,8 +167,11 @@ class QwenService {
       });
     }
 
-    // Then optionally send answer images
-    for (final path in answerImagePaths) {
+    // Then optionally send answer images (compressed for VLM).
+    final compressedAnswerPaths = await Future.wait(
+      answerImagePaths.map(ImageCompressor.compressedPathFor),
+    );
+    for (final path in compressedAnswerPaths) {
       final bytes = await File(path).readAsBytes();
       final b64 = base64Encode(bytes);
       imageContent.add({
@@ -292,7 +299,10 @@ class QwenService {
         : [imagePaths[0], imagePaths[imagePaths.length ~/ 2], imagePaths.last];
 
     final imageContent = <Map<String, dynamic>>[];
-    for (final path in samples) {
+    final compressedSamples = await Future.wait(
+      samples.map(ImageCompressor.compressedPathFor),
+    );
+    for (final path in compressedSamples) {
       final bytes = await File(path).readAsBytes();
       final b64 = base64Encode(bytes);
       imageContent.add({
@@ -363,7 +373,10 @@ class QwenService {
     final strategyText = strategyLines.join('\n\n');
 
     final imageContent = <Map<String, dynamic>>[];
-    for (final path in questionPaperPaths) {
+    final compressedQuestionPaths = await Future.wait(
+      questionPaperPaths.map(ImageCompressor.compressedPathFor),
+    );
+    for (final path in compressedQuestionPaths) {
       final bytes = await File(path).readAsBytes();
       final b64 = base64Encode(bytes);
       imageContent.add({
@@ -371,12 +384,14 @@ class QwenService {
         'image_url': {'url': 'data:${_mimeType(path)};base64,$b64'},
       });
     }
-    // Student submission image
-    final studentBytes = await File(imagePath).readAsBytes();
+    // Student submission image (compressed for VLM).
+    final compressedStudentPath =
+        await ImageCompressor.compressedPathFor(imagePath);
+    final studentBytes = await File(compressedStudentPath).readAsBytes();
     final studentB64 = base64Encode(studentBytes);
     imageContent.add({
       'type': 'image_url',
-      'image_url': {'url': 'data:${_mimeType(imagePath)};base64,$studentB64'},
+      'image_url': {'url': 'data:${_mimeType(compressedStudentPath)};base64,$studentB64'},
     });
 
     final resp = await _dio.post(

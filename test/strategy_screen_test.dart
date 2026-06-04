@@ -27,21 +27,21 @@ class _SeededNotifier extends StrategyNotifier {
   final List<ReferenceAnswer> _refs;
 
   @override
-  Future<void> loadOrGenerate(String taskId) async {}
+  Future<void> load(String taskId) async {} // keep seeded refs
 
   @override
   Future<void> saveAllConfirmed(String taskId) async {}
 }
 
 GradingTask _taskWithRubricForScreen(List<RubricItem> rubric) => GradingTask(
-      id: 't1',
-      name: 'T1',
-      subject: 'math',
-      createdAt: DateTime(2026),
-      rubric: rubric,
-      questionPaperPaths: const [],
-      answerImagePaths: const [],
-    );
+  id: 't1',
+  name: 'T1',
+  subject: 'math',
+  createdAt: DateTime(2026),
+  rubric: rubric,
+  questionPaperPaths: const [],
+  answerImagePaths: const [],
+);
 
 class _FakeScreenTaskNotifier extends TaskNotifier {
   _FakeScreenTaskNotifier(super.ref, this._task);
@@ -68,8 +68,7 @@ class _FakeQwenService extends QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
-  }) async =>
-      _next;
+  }) async => _next;
 }
 
 Future<void> _pumpScreen(
@@ -87,7 +86,8 @@ Future<void> _pumpScreen(
       ),
       GoRoute(
         path: '/tasks/:id/strategy',
-        builder: (_, s) => StrategyReviewScreen(taskId: s.pathParameters['id']!),
+        builder: (_, s) =>
+            StrategyReviewScreen(taskId: s.pathParameters['id']!),
       ),
     ],
   );
@@ -124,7 +124,9 @@ void main() {
     );
     expect(find.text('A'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
-    final FilledButton save = tester.widget(find.widgetWithText(FilledButton, '保存'));
+    final FilledButton save = tester.widget(
+      find.widgetWithText(FilledButton, '保存'),
+    );
     expect(save.onPressed, isNotNull);
   });
 
@@ -145,11 +147,15 @@ void main() {
     );
     await tester.enterText(find.byType(TextField).first, '');
     await tester.pump();
-    final FilledButton save = tester.widget(find.widgetWithText(FilledButton, '保存'));
+    final FilledButton save = tester.widget(
+      find.widgetWithText(FilledButton, '保存'),
+    );
     expect(save.onPressed, isNull);
   });
 
-  testWidgets('EditCheckpointSheet 单个 4 分 checkpoint：合计显示 4（不是 0）', (tester) async {
+  testWidgets('EditCheckpointSheet 单个 4 分 checkpoint：合计显示 4（不是 0）', (
+    tester,
+  ) async {
     // Bug 1+2：之前公式 currentTotal + _points - initialPoints 在「唯一一个
     // checkpoint = 4 分」时算出 0 + 4 - 4 = 0，错误地提示「总分不足 4」。
     // 修正后期望：合计 = 4，与 maxPoints 一致，不显示警告。
@@ -172,7 +178,9 @@ void main() {
     expect(find.textContaining('全部 checkpoint 分值合计'), findsNothing);
   });
 
-  testWidgets('EditCheckpointSheet 多 checkpoint：合计随 _points 变化', (tester) async {
+  testWidgets('EditCheckpointSheet 多 checkpoint：合计随 _points 变化', (
+    tester,
+  ) async {
     // Bug 1+2：3 个其他 checkpoint 各 1 分（合计 3），当前编辑项初始 1 分。
     // 修正后期望：合计 = 3 + 1 = 4（与 maxPoints 一致），不显示警告。
     // 把当前项调到 2 分后，合计应为 3 + 2 = 5（与 maxPoints 不一致，显示警告）。
@@ -239,7 +247,9 @@ void main() {
     expect(tapped, 2);
   });
 
-  testWidgets('BottomActionBar 未确认时显示「确认此题」、最后一题时「已是最后一题」disabled', (tester) async {
+  testWidgets('BottomActionBar 未确认时显示「确认此题」、最后一题时「已是最后一题」disabled', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -259,7 +269,9 @@ void main() {
     // 「已是最后一题」应该是 disabled 的 OutlinedButton —— 仅检查文本存在
   });
 
-  testWidgets('BottomActionBar 未确认时显示「确认此题」、非最后一题时「下一题 →」enabled', (tester) async {
+  testWidgets('BottomActionBar 未确认时显示「确认此题」、非最后一题时「下一题 →」enabled', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -334,63 +346,82 @@ void main() {
     expect(nextCount, 1);
   });
 
-  testWidgets('BottomActionBar disabled 状态：isLast 禁用 next、isRefining 禁用 refine + confirm', (tester) async {
-    // Scenario A: isLast: true → next 按钮 disabled，其余 enabled
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: BottomActionBar(
-            confirmed: false,
-            isLast: true,
-            isRefining: false,
-            onRefine: () {},
-            onConfirm: () {},
-            onNext: () {},
+  testWidgets(
+    'BottomActionBar disabled 状态：isLast 禁用 next、isRefining 禁用 refine + confirm',
+    (tester) async {
+      // Scenario A: isLast: true → next 按钮 disabled，其余 enabled
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BottomActionBar(
+              confirmed: false,
+              isLast: true,
+              isRefining: false,
+              onRefine: () {},
+              onConfirm: () {},
+              onNext: () {},
+            ),
           ),
         ),
-      ),
-    );
-    expect(
-      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '已是最后一题')).onPressed,
-      isNull,
-    );
-    expect(
-      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略')).onPressed,
-      isNotNull,
-    );
-    expect(
-      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题')).onPressed,
-      isNotNull,
-    );
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, '已是最后一题'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题'))
+            .onPressed,
+        isNotNull,
+      );
 
-    // Scenario B: isRefining: true → refine + confirm disabled，next enabled
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: BottomActionBar(
-            confirmed: false,
-            isLast: false,
-            isRefining: true,
-            onRefine: () {},
-            onConfirm: () {},
-            onNext: () {},
+      // Scenario B: isRefining: true → refine + confirm disabled，next enabled
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BottomActionBar(
+              confirmed: false,
+              isLast: false,
+              isRefining: true,
+              onRefine: () {},
+              onConfirm: () {},
+              onNext: () {},
+            ),
           ),
         ),
-      ),
-    );
-    expect(
-      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略')).onPressed,
-      isNull,
-    );
-    expect(
-      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题')).onPressed,
-      isNull,
-    );
-    expect(
-      tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '下一题 →')).onPressed,
-      isNotNull,
-    );
-  });
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '修改策略'))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '确认此题'))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, '下一题 →'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+    },
+  );
 
   testWidgets('QuestionPage 渲染 checkpoint 描述与分值', (tester) async {
     await tester.pumpWidget(
@@ -419,7 +450,9 @@ void main() {
     expect(find.text('2分'), findsOneWidget);
   });
 
-  testWidgets('QuestionPage 点击 checkpoint 行触发 onEditCheckpoint', (tester) async {
+  testWidgets('QuestionPage 点击 checkpoint 行触发 onEditCheckpoint', (
+    tester,
+  ) async {
     var editId = '';
     var editCpDescription = '';
     var editCpPoints = -1;
@@ -447,7 +480,10 @@ void main() {
       ),
     );
     // Tap the first checkpoint row via its description text's InkWell ancestor.
-    final firstRow = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+    final firstRow = find.ancestor(
+      of: find.text('答对'),
+      matching: find.byType(InkWell),
+    );
     await tester.tap(firstRow);
     await tester.pump();
     expect(editId, 'q1-cp0');
@@ -535,16 +571,18 @@ void main() {
     // provider when not overridden) doesn't blow up during widget tests.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('plugins.flutter.io/path_provider'),
-      (call) async => '/tmp',
-    );
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async => '/tmp',
+        );
 
     testWidgets('StrategyReviewScreen PageView 渲染 N 页', (tester) async {
       final refs = [
         for (var i = 1; i <= 3; i++)
           ReferenceAnswer(
             questionNumber: i,
-            checkpoints: [CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1)],
+            checkpoints: [
+              CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1),
+            ],
           ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -561,11 +599,15 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 1)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 1),
+          ],
         ),
         ReferenceAnswer(
           questionNumber: 2,
-          checkpoints: const [CheckpointDef(id: 'q2-cp0', description: 'A', points: 1)],
+          checkpoints: const [
+            CheckpointDef(id: 'q2-cp0', description: 'A', points: 1),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -584,7 +626,9 @@ void main() {
         for (var i = 1; i <= 3; i++)
           ReferenceAnswer(
             questionNumber: i,
-            checkpoints: [CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1)],
+            checkpoints: [
+              CheckpointDef(id: 'q$i-cp0', description: 'A', points: 1),
+            ],
           ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -607,7 +651,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: '答对', points: 3),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -615,13 +661,18 @@ void main() {
       ]);
       await _pumpScreen(tester, refs: refs, task: task);
       // Find the checkpoint row via the InkWell ancestor of the description text.
-      final row = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+      final row = find.ancestor(
+        of: find.text('答对'),
+        matching: find.byType(InkWell),
+      );
       await tester.tap(row);
       await tester.pumpAndSettle();
       expect(find.byType(EditCheckpointSheet), findsOneWidget);
     });
 
-    testWidgets('Edit sheet warning 以 rubric 满分为基准（PR review #1 修复）', (tester) async {
+    testWidgets('Edit sheet warning 以 rubric 满分为基准（PR review #1 修复）', (
+      tester,
+    ) async {
       // PR review 反馈：之前 maxPoints 传入的是 checkpoints 当前合计，
       // 应该是 rubric 的 RubricItem.maxPoints。
       // 这个用例：rubric 满分 4，checkpoints 合计 3（1+1+1），
@@ -641,7 +692,10 @@ void main() {
       ]);
       await _pumpScreen(tester, refs: refs, task: task);
       // Open the edit sheet for checkpoint A (any of them works).
-      final row = find.ancestor(of: find.text('A'), matching: find.byType(InkWell));
+      final row = find.ancestor(
+        of: find.text('A'),
+        matching: find.byType(InkWell),
+      );
       await tester.tap(row);
       await tester.pumpAndSettle();
       // 关键断言：warning 文本应以 rubric 满分 4 为基准。
@@ -653,7 +707,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: '答对', points: 3),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -661,7 +717,10 @@ void main() {
       ]);
       await _pumpScreen(tester, refs: refs, task: task);
       // Open the edit sheet.
-      final row = find.ancestor(of: find.text('答对'), matching: find.byType(InkWell));
+      final row = find.ancestor(
+        of: find.text('答对'),
+        matching: find.byType(InkWell),
+      );
       await tester.tap(row);
       await tester.pumpAndSettle();
       // Modify the description in the sheet.
@@ -680,7 +739,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 3)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: '答对', points: 3),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -716,7 +777,9 @@ void main() {
       // with non-empty checkpoints, simulating a successful retry.
       const replacement = ReferenceAnswer(
         questionNumber: 1,
-        checkpoints: [CheckpointDef(id: 'q1-cp0', description: '新策略', points: 5)],
+        checkpoints: [
+          CheckpointDef(id: 'q1-cp0', description: '新策略', points: 5),
+        ],
       );
       final fakeQwen = _FakeQwenService(replacement);
 
@@ -743,7 +806,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A1', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A1', points: 5),
+          ],
         ),
         const ReferenceAnswer(
           questionNumber: 2,
@@ -752,7 +817,9 @@ void main() {
         ),
         ReferenceAnswer(
           questionNumber: 3,
-          checkpoints: const [CheckpointDef(id: 'q3-cp0', description: 'A3', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q3-cp0', description: 'A3', points: 5),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
@@ -764,7 +831,9 @@ void main() {
       // Fake QwenService — simulate successful retry.
       const replacement = ReferenceAnswer(
         questionNumber: 2,
-        checkpoints: [CheckpointDef(id: 'q2-cp0', description: '新策略 q2', points: 5)],
+        checkpoints: [
+          CheckpointDef(id: 'q2-cp0', description: '新策略 q2', points: 5),
+        ],
       );
       final fakeQwen = _FakeQwenService(replacement);
 
@@ -798,14 +867,15 @@ void main() {
         of: find.byType(ProgressDots),
         matching: find.byType(GestureDetector),
       );
-      expect(dotsAfter, findsNWidgets(3),
-          reason: '重试后 progress dots 应仍为 3 个，不应多出一个');
-      expect(find.text('第 4 题'), findsNothing,
-          reason: '不应出现「第 4 题」');
+      expect(
+        dotsAfter,
+        findsNWidgets(3),
+        reason: '重试后 progress dots 应仍为 3 个，不应多出一个',
+      );
+      expect(find.text('第 4 题'), findsNothing, reason: '不应出现「第 4 题」');
 
       // 重试结果应该出现在第 2 题的页面上。
-      expect(find.text('该题生成失败'), findsNothing,
-          reason: '重试成功后失败 banner 应消失');
+      expect(find.text('该题生成失败'), findsNothing, reason: '重试成功后失败 banner 应消失');
       expect(find.text('新策略 q2'), findsOneWidget);
     });
 
@@ -813,12 +883,18 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: '答对', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: '答对', points: 5),
+          ],
         ),
       ];
       final task = _taskWithRubricForScreen(const [
         RubricItem(
-            questionNumber: 1, type: 'subjective', maxPoints: 5, questionText: '已知 z = 1 + i'),
+          questionNumber: 1,
+          type: 'subjective',
+          maxPoints: 5,
+          questionText: '已知 z = 1 + i',
+        ),
       ]);
       await _pumpScreen(tester, refs: refs, task: task);
       await tester.tap(find.widgetWithText(OutlinedButton, '修改策略'));
@@ -827,8 +903,7 @@ void main() {
       // Header shows the question text since it's non-empty.
       expect(find.textContaining('已知 z = 1 + i'), findsOneWidget);
       // Empty-state hint is visible.
-      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'),
-          findsOneWidget);
+      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'), findsOneWidget);
     });
   });
 
@@ -837,13 +912,14 @@ void main() {
       const refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          checkpoints: [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 5),
+          ],
         ),
       ];
       await _pumpChatSheet(tester, refs: refs);
       await tester.pumpAndSettle();
-      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'),
-          findsOneWidget);
+      expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'), findsOneWidget);
       // Send IconButton is disabled when input is empty.
       final sendBtn = tester.widget<IconButton>(
         find.widgetWithIcon(IconButton, Icons.send),
@@ -855,7 +931,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 5),
+          ],
           chatHistory: const [
             StrategyMessage(role: 'user', content: '把第 1 条改成 2 分'),
             StrategyMessage(role: 'assistant', content: '好的，已更新'),
@@ -868,12 +946,13 @@ void main() {
       expect(find.text('好的，已更新'), findsOneWidget);
     });
 
-    testWidgets('输入文本后点发送：调用 notifier.sendMessage 并清空输入',
-        (tester) async {
+    testWidgets('输入文本后点发送：调用 notifier.sendMessage 并清空输入', (tester) async {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 5),
+          ],
         ),
       ];
       final notifier = await _pumpChatSheet(tester, refs: refs);
@@ -897,8 +976,9 @@ void main() {
       expect(input.controller!.text, isEmpty);
     });
 
-    testWidgets('provider 推送新消息后 ListView 自动滚到底部（PR review #2 修复）',
-        (tester) async {
+    testWidgets('provider 推送新消息后 ListView 自动滚到底部（PR review #2 修复）', (
+      tester,
+    ) async {
       // 初始 20 条消息（会溢出测试视口）。
       final initial = List.generate(
         20,
@@ -910,7 +990,9 @@ void main() {
       final refs = [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          checkpoints: const [
+            CheckpointDef(id: 'q1-cp0', description: 'A', points: 5),
+          ],
           chatHistory: initial,
         ),
       ];
@@ -921,7 +1003,9 @@ void main() {
         of: find.byType(ListView),
         matching: find.byType(Scrollable),
       );
-      ScrollableState scrollable = tester.state<ScrollableState>(listScrollable);
+      ScrollableState scrollable = tester.state<ScrollableState>(
+        listScrollable,
+      );
       expect(scrollable.position.pixels, scrollable.position.maxScrollExtent);
 
       // 模拟 AI 回复追加了 5 条消息。
@@ -952,13 +1036,17 @@ class _ChatSheetNotifier extends StrategyNotifier {
   int? lastSentQuestionNum;
 
   @override
-  Future<void> loadOrGenerate(String taskId) async {}
+  Future<void> load(String taskId) async {}
 
   @override
   Future<void> saveAllConfirmed(String taskId) async {}
 
   @override
-  Future<void> sendMessage(String taskId, int questionNum, String message) async {
+  Future<void> sendMessage(
+    String taskId,
+    int questionNum,
+    String message,
+  ) async {
     sendMessageCallCount++;
     lastSentTaskId = taskId;
     lastSentQuestionNum = questionNum;

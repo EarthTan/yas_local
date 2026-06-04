@@ -15,7 +15,9 @@ class _AllConfirmedNotifier extends StrategyNotifier {
       references: [
         ReferenceAnswer(
           questionNumber: 1,
-          checkpoints: [CheckpointDef(id: 'q1-cp0', description: '答对', points: 5)],
+          checkpoints: [
+            CheckpointDef(id: 'q1-cp0', description: '答对', points: 5),
+          ],
           confirmed: true,
         ),
       ],
@@ -23,7 +25,7 @@ class _AllConfirmedNotifier extends StrategyNotifier {
   }
 
   @override
-  Future<void> loadOrGenerate(String taskId) async {}
+  Future<void> load(String taskId) async {}
 
   @override
   Future<void> saveAllConfirmed(String taskId) async {}
@@ -35,50 +37,52 @@ void main() {
   // StrategyReviewScreen reads taskProvider) doesn't blow up in widget tests.
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-    const MethodChannel('plugins.flutter.io/path_provider'),
-    (call) async => '/tmp',
-  );
+        const MethodChannel('plugins.flutter.io/path_provider'),
+        (call) async => '/tmp',
+      );
 
-  testWidgets('confirming all strategies navigates to task hub, not grading screen',
-      (tester) async {
-    final router = GoRouter(
-      initialLocation: '/tasks/t1/strategy',
-      routes: [
-        GoRoute(
-          path: '/tasks/:id',
-          builder: (_, _) => const Scaffold(body: Text('task-hub')),
-        ),
-        GoRoute(
-          path: '/tasks/:id/strategy',
-          builder: (_, s) =>
-              StrategyReviewScreen(taskId: s.pathParameters['id']!),
-        ),
-        GoRoute(
-          path: '/tasks/:id/grading',
-          builder: (_, _) => const Scaffold(body: Text('grading-screen')),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          strategyProvider.overrideWith((ref) => _AllConfirmedNotifier(ref)),
+  testWidgets(
+    'confirming all strategies navigates to task hub, not grading screen',
+    (tester) async {
+      final router = GoRouter(
+        initialLocation: '/tasks/t1/strategy',
+        routes: [
+          GoRoute(
+            path: '/tasks/:id',
+            builder: (_, _) => const Scaffold(body: Text('task-hub')),
+          ),
+          GoRoute(
+            path: '/tasks/:id/strategy',
+            builder: (_, s) =>
+                StrategyReviewScreen(taskId: s.pathParameters['id']!),
+          ),
+          GoRoute(
+            path: '/tasks/:id/grading',
+            builder: (_, _) => const Scaffold(body: Text('grading-screen')),
+          ),
         ],
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await tester.pump();
+      );
 
-    // Find the single FilledButton in the bottom bar (enabled when allConfirmed=true)
-    final button = find.byType(FilledButton);
-    expect(button, findsOneWidget);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            strategyProvider.overrideWith((ref) => _AllConfirmedNotifier(ref)),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pump();
 
-    await tester.tap(button);
-    await tester.pumpAndSettle();
+      // Find the single FilledButton in the bottom bar (enabled when allConfirmed=true)
+      final button = find.byType(FilledButton);
+      expect(button, findsOneWidget);
 
-    // Must land on task hub, NOT on grading screen
-    expect(find.text('task-hub'), findsOneWidget);
-    expect(find.text('grading-screen'), findsNothing);
-  });
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+
+      // Must land on task hub, NOT on grading screen
+      expect(find.text('task-hub'), findsOneWidget);
+      expect(find.text('grading-screen'), findsNothing);
+    },
+  );
 }
