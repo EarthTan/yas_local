@@ -3,6 +3,12 @@
 class AppPrompts {
   AppPrompts._();
 
+  /// Appended to the system text on a retry caused by a JSON parse failure,
+  /// so the model gets a fresh chance to emit clean JSON. Same wording on every
+  /// retry — never stacked.
+  static const String jsonRetryNudge =
+      '\n\n注意：上一次返回的内容无法解析为 JSON，请只返回纯 JSON，不要任何解释或 <think> 内容。';
+
   /// Shared output protocol used by all 4 LLM calls. Each call appends its
   /// own step 3 (the expected JSON schema) after this prefix.
   ///
