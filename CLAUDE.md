@@ -108,31 +108,54 @@ It strips `<think>…</think>` and `<thinking>…</thinking>` blocks (case-insen
 - `settings.json`: single `AppSettings` object.
 - Images copied to app documents directory for persistence across sessions.
 
-## Debug sink 架构
+## Debug 与可观测性
 
-所有 Qwen 调用 / 业务事件 / JSON 解析尝试都通过 `DebugService` 记录，并由一个可插拔的 **sink 列表** 写入多个目的地。
+所有 Qwen 调用 / 业务事件 / JSON 解析尝试 / Flutter 错误都通过 `DebugService` 记录，由一个 sink 列表分发到多个目的地。
 
-### 接口与实现
+### 架构
 
-- `lib/services/debug/debug_sink.dart` — `DebugSink` 接口（`write` / `flush` / `close`）。`write` **绝不能抛异常**——内部 try/catch 兜底。
-- `lib/services/debug/in_memory_ring_sink.dart` — `InMemoryRingSink`，进程内 ring buffer（qwen 200 / event 1000 / json 200）。
-- `lib/services/debug/rolling_file_sink.dart` — `RollingFileSink`，按天 + 5MB 轮转的 NDJSON 文件。**当前落盘的唯一实现**（`QwenLogger` 已在 `95324e5` 中被删除）。
+```
+Flutter 代码
+   ↓ recordQwenCall / recordEvent / recordJsonAttempt
+DebugService (singleton)
+   ├→ DebugStats (O(1) 写入路径上更新计数)
+   └→ [InMemoryRingSink, RollingFileSink, ...]   (可插拔)
+```
 
-### 落盘路径
+- **Service**: `lib/services/debug/debug_service.dart` —— `DebugService.instance` 是单例，public API 是 `recordQwenCall` / `recordEvent` / `recordJsonAttempt` / `setEnabled` / `clear` / `resetForTest`。内部用 `_dispatch` 路由到所有 sink。
+- **Sink 接口**: `lib/services/debug/debug_sink.dart` —— `DebugSink.write(record)` **绝不能抛异常**。
+- **InMemoryRingSink**: 进程内 ring buffer，容量（qwen 200 / event 1000 / json 200）通过构造参数注入。
+- **RollingFileSink**: 落盘到 `getApplicationSupportDirectory()/log/yas_YYYY-MM-DD.log`，5MB 轮转、NDJSON 格式。
+- **DebugStats**: 写入路径上 O(1) 更新 `Map<DebugScope, _ScopeStats>` 计数器；snapshot 给 Stats tab 用。
 
-- **macOS**: `~/Library/Containers/cn.yas.yasLocal/Data/Library/Application Support/log/yas_YYYY-MM-DD.log`
-- **iOS**: sandboxed，导出见 §"调试导出"。
+### 错误捕获三件套（main.dart）
 
-NDJSON 格式（每行一个 JSON 对象），按 `recordType` 区分：
-- `qwen_call`: Qwen HTTP 调用记录
-- `event`: 业务事件（`scope` 形如 `task:<id>` / `sub:<id>` / `flutter_error` / `async_error` / `zone_error`）
-- `json_attempt`: JSON 解析尝试链
+| 钩子 | 捕获 | 典型来源 |
+|---|---|---|
+| `FlutterError.onError` | framework 内同步异常 | Widget build 抛错、layout overflow、`setState() called after dispose()` |
+| `PlatformDispatcher.instance.onError` | 顶层 async 未捕获 | `Future` 里 throw 但没人 await |
+| `runZonedGuarded` 兜底 | zone 内所有未捕获 | 启动期 async、Timer callback、Stream subscription |
+| `ErrorWidget.builder` | widget render 抛错 | 自定义 widget build 异常 |
 
-排查常用：`grep '"level":"error"' yas_*.log | head -20`。
+`kDebugMode` 时仍 `FlutterError.presentError` 弹红屏；release 模式不暴露。
+
+### /debug 屏
+
+`/debug` 路由 5 个 tab（`lib/screens/debug/tabs/`）：
+- **Qwen 调用** — 每次 Qwen HTTP 调用的完整记录
+- **事件** — 业务事件（`scope` 形如 `task:<id>` / `sub:<id>` / `flutter_error` 等）
+- **JSON 解析** — 每次 `JsonExtractor` 解析尝试链
+- **状态** — `DebugService.stateSnapshot`（tasks / references / settings）
+- **统计** — `DebugStats` 实时面板，per-scope 计数 + 全局 p50/p95 + 错误率
+
+每 tab 顶部都有 Export 按钮（见下）。
 
 ### 调试导出
 
-app 内 `/debug` 屏每个 tab 顶部都有 Export 按钮，把当前 tab 数据序列化为 JSON 写到 `~/Library/.../Documents/exports/`，macOS 弹 Finder 高亮，iOS 弹 share sheet。详见 Milestone 5 设计。
+每个 tab 顶部的 Export IconButton：
+- 序列化当前 tab 数据为 pretty JSON
+- 写到 `{getApplicationDocumentsDirectory()}/exports/{tab}_{yyyyMMdd_HHmmss}.json`
+- macOS 弹 Finder 高亮（`open -R`）；iOS 弹 share sheet（`share_plus`）；其它降级到剪贴板
 
 ## Key patterns
 
@@ -147,6 +170,9 @@ app 内 `/debug` 屏每个 tab 顶部都有 Export 按钮，把当前 tab 数据
 - **Base URL normalization**: `QwenService._normalizeBaseUrl()` strips common endpoint suffixes so users can paste full URLs in settings.
 - **Teacher overrides**: `GradedItem.finalScore` prefers `teacherScore` over `aiScore`; `teacherScore` set via slider in `paper_detail_screen.dart`.
 - **Confidence traffic light**: `GradedItem.trafficLight` — green (≥0.85), yellow (≥0.60), red (<0.60).
+- **Debug 是开发者工具**：所有 debug 数据只在 `/debug` 屏 + 磁盘日志里，**不**对老师 / 学生可见。
+- **ErrorBoundary 不存在**：Flutter 没有真正的局部 ErrorBoundary，依赖 `FlutterError.onError` / `PlatformDispatcher.onError` / `runZonedGuarded` / `ErrorWidget.builder` 四件套兜底；自定义 widget 内的 try/catch 由业务侧负责。
+- **Sink 永远不抛**：`DebugSink.write` 必须 try/catch 内部错误（兜底），但 sink 实现不应依赖这个兜底。
 
 ## File map
 
@@ -162,6 +188,9 @@ This list is intentionally non-exhaustive — only the files that materially sha
 - `debug/debug_service.dart` — `DebugService` singleton + record types (QwenCallRecord, EventRecord, JsonAttemptRecord). Routes records through a `List<DebugSink>`. See "Debug sink architecture" above.
 - `debug/in_memory_ring_sink.dart` — `InMemoryRingSink`, the default in-memory sink on `DebugService.instance`.
 - `debug/rolling_file_sink.dart` — `RollingFileSink`, NDJSON + 5MB rotation sink; added at app startup via `DebugService.instance.addSink(...)` in `main.dart`.
+- `debug/debug_stats.dart` — `DebugStats` with O(1) per-scope counters and percentile snapshot.
+- `debug/debug_export.dart` — `DebugExport.writeJson` + `reveal` (per-tab JSON export).
+- `debug/tab_constants.dart` — 5 tab name constants.
 - `run_pool.dart` — `runPool(items, maxConcurrency, task)` concurrency helper (see "Async background jobs").
 - `error_formatter.dart` — Chinese-language Dio error formatter.
 - `task_store.dart`, `reference_store.dart`, `settings_store.dart` — JSON file I/O.
@@ -202,10 +231,16 @@ Notable files (full directory is in `yas_local/test/`):
 - `strategy_provider_test.dart`, `strategy_navigation_test.dart` — `StrategyNotifier` review side, navigation.
 - `debug_service_test.dart`, `debug_provider_test.dart` — `DebugService` ring buffers + opt-in flag + reset semantics.
 - `image_compressor_test.dart` — VLM-input image compression.
+- `debug_sink_test.dart` — InMemoryRingSink 裁剪 + RollingFileSink rotation
+- `debug_stats_test.dart` — O(1) 计数、p50/p95、最近 100 裁剪
+- `debug_export_test.dart` — 写文件 + 平台 reveal 不抛
+- `main_error_hooks_test.dart` — 四件套钩子安装
+- `error_widget_test.dart` — `ErrorWidget.builder` 触发 record
 - `widget_test.dart` — smoke test, renders `YasApp`.
 
 ## Project docs
 
 - `docs/2026-05-31-yas-local-mvp.md` — Original MVP plan (superseded by the two-phase redesign).
 - `docs/grading-redesign.md` — Two-phase grading design doc (now fully implemented; explains why Phase 1 exists separately and why checkpoint scoring replaced binary grading).
+- `docs/superpowers/plans/2026-06-05-debug-observability.md` — M1-M5 implementation plan (sink-based debug architecture).
 - `yas_local/README.md` — User-facing Chinese README; covers dev commands, log file locations, and how to export logs from iOS.
