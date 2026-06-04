@@ -655,5 +655,77 @@ void main() {
       expect(find.text('该题生成失败'), findsNothing);
       expect(find.text('新策略'), findsOneWidget);
     });
+
+    testWidgets('3 题场景：失败题点重试后列表长度仍为 3', (tester) async {
+      // Bug 复现：3 题 rubric，第 2 题失败；用户对第 2 题点「重试此题」
+      // 之后，期望 progress dots、pageview、title 仍对应 3 题。
+      final refs = [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A1', points: 5)],
+        ),
+        const ReferenceAnswer(
+          questionNumber: 2,
+          checkpoints: [],
+          hasConsensus: false,
+        ),
+        ReferenceAnswer(
+          questionNumber: 3,
+          checkpoints: const [CheckpointDef(id: 'q3-cp0', description: 'A3', points: 5)],
+        ),
+      ];
+      final task = _taskWithRubricForScreen(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 5),
+      ]);
+
+      // Fake QwenService — simulate successful retry.
+      const replacement = ReferenceAnswer(
+        questionNumber: 2,
+        checkpoints: [CheckpointDef(id: 'q2-cp0', description: '新策略 q2', points: 5)],
+      );
+      final fakeQwen = _FakeQwenService(replacement);
+
+      await _pumpScreen(
+        tester,
+        refs: refs,
+        task: task,
+        qwenFactory: (_) => fakeQwen,
+      );
+
+      // 重试前：3 个 progress dots，title 是 1/3。
+      final dots = find.descendant(
+        of: find.byType(ProgressDots),
+        matching: find.byType(GestureDetector),
+      );
+      expect(dots, findsNWidgets(3), reason: '重试前应有 3 个 progress dots');
+      expect(find.text('批改策略  ·  1/3'), findsOneWidget);
+
+      // 跳到第 2 题：用 progress dot 2（index 1）。
+      await tester.tap(dots.at(1));
+      await tester.pumpAndSettle();
+      expect(find.text('第 2 题'), findsOneWidget);
+      expect(find.text('重试此题'), findsOneWidget);
+
+      // 点重试。
+      await tester.tap(find.widgetWithText(FilledButton, '重试此题'));
+      await tester.pumpAndSettle();
+
+      // 关键断言：列表里仍是 3 题，没有变 4 题。
+      final dotsAfter = find.descendant(
+        of: find.byType(ProgressDots),
+        matching: find.byType(GestureDetector),
+      );
+      expect(dotsAfter, findsNWidgets(3),
+          reason: '重试后 progress dots 应仍为 3 个，不应多出一个');
+      expect(find.text('第 4 题'), findsNothing,
+          reason: '不应出现「第 4 题」');
+
+      // 重试结果应该出现在第 2 题的页面上。
+      expect(find.text('该题生成失败'), findsNothing,
+          reason: '重试成功后失败 banner 应消失');
+      expect(find.text('新策略 q2'), findsOneWidget);
+    });
   });
 }

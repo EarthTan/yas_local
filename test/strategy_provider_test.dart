@@ -40,9 +40,41 @@ class _ThrowingQwenService extends QwenService {
   }
 }
 
+/// Returns a successful [ReferenceAnswer] for whatever question the caller
+/// asked about. Used to verify that `retryGenerate` replaces the existing
+/// entry in place rather than appending a new one.
+class _FakeSuccessfulQwenService extends QwenService {
+  _FakeSuccessfulQwenService() : super(const AppSettings(apiKey: 'k'));
+  @override
+  Future<ReferenceAnswer> generateStrategy({
+    required RubricItem rubricItem,
+    required List<String> questionPaperPaths,
+    required List<String> answerImagePaths,
+    int totalQuestions = 0,
+  }) async {
+    return ReferenceAnswer(
+      questionNumber: rubricItem.questionNumber,
+      checkpoints: [
+        CheckpointDef(
+          id: 'q${rubricItem.questionNumber}-cp0',
+          description: '重试生成的 checkpoint',
+          points: 5,
+        ),
+      ],
+      hasConsensus: true,
+    );
+  }
+}
+
 class _FakeUnconfiguredSettingsNotifier extends SettingsNotifier {
   _FakeUnconfiguredSettingsNotifier() {
     state = const AppSettings();
+  }
+}
+
+class _FakeConfiguredSettingsNotifier extends SettingsNotifier {
+  _FakeConfiguredSettingsNotifier() {
+    state = const AppSettings(apiKey: 'k');
   }
 }
 
@@ -176,6 +208,64 @@ void main() {
       expect(notifier.state.refining, false);
       expect(notifier.state.refiningQuestion, isNull);
       expect(notifier.state.error, isNotNull);
+    });
+
+    test('重试成功时 references 长度保持不变，失败项被替换为新结果', () async {
+      // 3 题 rubric：第 1 题成功、第 2 题失败、第 3 题成功。
+      // 模拟用户对失败的第 2 题点「重试此题」，
+      // 期望 references 长度仍为 3，且第 2 题的 checkpoints 被填上。
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 2, type: 'subjective', maxPoints: 5),
+        RubricItem(questionNumber: 3, type: 'subjective', maxPoints: 5),
+      ]);
+      final container = ProviderContainer(overrides: [
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        settingsProvider.overrideWith((ref) => _FakeConfiguredSettingsNotifier()),
+        qwenFactoryProvider.overrideWithValue((ref) => _FakeSuccessfulQwenService()),
+      ]);
+      addTearDown(() => drainAndDispose(container));
+      final notifier = container.read(strategyProvider.notifier);
+      notifier.state = StrategyState(
+        references: [
+          ReferenceAnswer(
+            questionNumber: 1,
+            checkpoints: const [
+              CheckpointDef(id: 'q1-cp0', description: 'A', points: 5),
+            ],
+          ),
+          // 第 2 题 _generate 失败：checkpoints 为空。
+          const ReferenceAnswer(
+            questionNumber: 2,
+            checkpoints: [],
+            hasConsensus: false,
+          ),
+          ReferenceAnswer(
+            questionNumber: 3,
+            checkpoints: const [
+              CheckpointDef(id: 'q3-cp0', description: 'C', points: 5),
+            ],
+          ),
+        ],
+      );
+
+      // 重试前：长度 3，第 2 题 checkpoints 为空。
+      expect(notifier.state.references.length, 3);
+      expect(notifier.state.references[1].checkpoints, isEmpty);
+
+      await notifier.retryGenerate('t1', 2);
+
+      // 关键断言：长度仍为 3，**不是 4**。
+      expect(notifier.state.references.length, 3,
+          reason: 'retryGenerate 不应向列表追加新条目');
+      // 第 2 题被成功的新结果替换。
+      expect(notifier.state.references[1].questionNumber, 2);
+      expect(notifier.state.references[1].checkpoints, isNotEmpty);
+      // 其它两题保持原样。
+      expect(notifier.state.references[0].questionNumber, 1);
+      expect(notifier.state.references[0].checkpoints.single.description, 'A');
+      expect(notifier.state.references[2].questionNumber, 3);
+      expect(notifier.state.references[2].checkpoints.single.description, 'C');
     });
   });
 }
