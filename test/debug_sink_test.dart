@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:yas_local/services/debug/debug_sink.dart';
 import 'package:yas_local/services/debug/in_memory_ring_sink.dart';
 import 'package:yas_local/services/debug/debug_service.dart';
+import 'package:yas_local/services/debug/rolling_file_sink.dart';
 
 void main() {
   test('DebugSink is an interface (cannot be instantiated directly)', () {
@@ -68,6 +73,96 @@ void main() {
       expect(sink.qwenCalls, isEmpty);
     });
   });
+
+  group('RollingFileSink', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('rolling_sink_test_');
+    });
+
+    tearDown(() async {
+      if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+    });
+
+    test('writes NDJSON lines for QwenCallRecord', () async {
+      PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
+      final sink = RollingFileSink(directory: '${tempDir.path}/log', baseName: 'test');
+      sink.write(QwenCallRecord(
+        timestamp: DateTime(2026, 6, 5, 14, 23),
+        scope: 'grade',
+        model: 'qwen',
+        endpoint: '/chat/completions',
+        statusCode: 200,
+        elapsedMs: 100,
+        status: QwenCallStatus.ok,
+        messages: const [],
+        responseContent: 'r',
+      ));
+      await sink.flush();
+
+      final files = tempDir.listSync(recursive: true).whereType<File>().toList();
+      expect(files, hasLength(1));
+      final content = await files.first.readAsString();
+      expect(content, contains('"recordType":"qwen_call"'));
+      expect(content, contains('"scope":"grade"'));
+      expect(content, endsWith('\n'));
+    });
+
+    test('rotates when file exceeds maxFileBytes', () async {
+      PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
+      final sink = RollingFileSink(
+        directory: '${tempDir.path}/log',
+        baseName: 'test',
+        maxFileBytes: 200,
+      );
+      for (var i = 0; i < 5; i++) {
+        sink.write(EventRecord(
+          timestamp: DateTime(2026, 6, 5, 14, 23, i),
+          scope: 's',
+          level: EventLevel.info,
+          message: 'message-$i-padded-to-fill-bytes',
+        ));
+      }
+      await sink.flush();
+
+      final files = tempDir
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.contains('test_'))
+          .toList();
+      expect(files.length, greaterThan(1), reason: 'should have rotated');
+      final newest = files.toList()..sort((a, b) => b.path.compareTo(a.path));
+      final content = await newest.first.readAsString();
+      expect(content, contains('message-4'));
+    });
+
+    test('write never throws even if directory does not exist', () async {
+      final sink = RollingFileSink(
+        directory: '/nonexistent_root_xyz/that_cannot_be_created/\x00invalid',
+        baseName: 'test',
+      );
+      expect(
+        () => sink.write(EventRecord(
+          timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'x',
+        )),
+        returnsNormally,
+      );
+    });
+
+    test('flush is no-op when nothing was written', () async {
+      PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
+      final sink = RollingFileSink(directory: '${tempDir.path}/log', baseName: 'test');
+      await sink.flush();
+    });
+  });
+}
+
+class _MemoryPathProvider extends PathProviderPlatform with MockPlatformInterfaceMixin {
+  _MemoryPathProvider(this.dir);
+  final Directory dir;
+  @override
+  Future<String?> getApplicationSupportPath() async => dir.path;
 }
 
 class _UnknownRecord implements DebugRecord {
@@ -75,6 +170,8 @@ class _UnknownRecord implements DebugRecord {
   String get recordType => 'unknown';
   @override
   DateTime get timestamp => DateTime.now();
+  @override
+  Map<String, Object?> toJson() => {};
 }
 
 class _RecordingSink implements DebugSink {

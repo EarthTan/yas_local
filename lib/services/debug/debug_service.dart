@@ -50,7 +50,24 @@ class QwenCallRecord implements DebugRecord {
 
   @override
   String get recordType => 'qwen_call';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'model': model,
+        'endpoint': endpoint,
+        'statusCode': statusCode,
+        'elapsedMs': elapsedMs,
+        'status': status.name,
+        'messages': messages,
+        'responseContent': responseContent,
+        'reasoningContent': reasoningContent,
+        'errorMessage': errorMessage,
+      };
 }
+
 
 /// One process event from a provider (identification / strategy / grading).
 class EventRecord implements DebugRecord {
@@ -71,6 +88,16 @@ class EventRecord implements DebugRecord {
 
   @override
   String get recordType => 'event';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'level': level.name,
+        'message': message,
+        'data': data,
+      };
 }
 
 /// A single parsing attempt within JsonExtractor.
@@ -105,6 +132,18 @@ class JsonAttemptRecord implements DebugRecord {
 
   @override
   String get recordType => 'json_attempt';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'inputSnippet': inputSnippet,
+        'attempts': attempts
+            .map((a) => {'method': a.method, 'ok': a.ok, 'error': a.error})
+            .toList(),
+        'finalException': finalException,
+      };
 }
 
 /// Snapshot of in-memory app state. Refreshed by TaskNotifier / SettingsNotifier.

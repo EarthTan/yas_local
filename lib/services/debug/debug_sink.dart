@@ -4,6 +4,7 @@
 abstract class DebugRecord {
   String get recordType; // 'qwen_call' | 'event' | 'json_attempt'
   DateTime get timestamp;
+  Map<String, Object?> toJson();
 }
 
 /// Pluggable destination for debug records. Implementations MUST NOT throw
