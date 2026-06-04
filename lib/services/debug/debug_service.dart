@@ -293,6 +293,7 @@ class DebugService {
     _enabled = false;
     _changes.dispose();
     _changes = _DebugNotifier();
+    _stats.reset();
     clear();
     if (identical(this, instance)) {
       _sinks = [InMemoryRingSink()];

@@ -60,6 +60,21 @@ class DebugStats {
     for (final s in DebugScope.values) s: _ScopeStats(),
   };
 
+  /// Test-only helper. Resets every per-scope counter back to zero so a
+  /// fresh test starts from a clean slate.
+  void reset() {
+    for (final s in _byScope.values) {
+      s.calls = 0;
+      s.ok = 0;
+      s.httpError = 0;
+      s.parseError = 0;
+      s.otherError = 0;
+      s.totalMs = 0;
+      s.maxMs = 0;
+      s._recent.clear();
+    }
+  }
+
   void record(DebugRecord record) {
     final s = _scopeOf(record);
     final stats = _byScope[s]!;
