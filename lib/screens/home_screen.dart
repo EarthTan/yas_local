@@ -77,9 +77,10 @@ TaskCardStatus resolveTaskCardStatus({
     );
   }
   if (subDone > 0 && subDone < subTotal) {
+    final failTag = subFailed > 0 ? '（$subFailed 失败）' : '';
     return TaskCardStatus(
       TaskCardKind.gradingIncomplete,
-      '已批改 $subDone / $subTotal · 继续',
+      '已批改 $subDone / $subTotal$failTag · 继续',
     );
   }
   return TaskCardStatus(TaskCardKind.idle, '$subject · $subTotal 份');
@@ -182,7 +183,14 @@ class HomeScreen extends ConsumerWidget {
                                   status.kind == TaskCardKind.gradingFailed
                                   ? const Icon(Icons.refresh, color: Colors.red)
                                   : const Icon(Icons.chevron_right),
-                              onTap: () => context.push('/tasks/${t.id}'),
+                              // A failed card promises "点击重试": tapping re-runs
+                              // grading (which targets only the non-done/failed
+                              // submissions). Other cards open the task.
+                              onTap: status.kind == TaskCardKind.gradingFailed
+                                  ? () => ref
+                                        .read(jobQueueProvider.notifier)
+                                        .startGrading(t.id)
+                                  : () => context.push('/tasks/${t.id}'),
                             );
                           },
                         ),

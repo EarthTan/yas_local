@@ -165,8 +165,13 @@ class _S extends ConsumerState<TaskDetailScreen> {
               )
             else
               OutlinedButton.icon(
+                // Refresh cached refs on return so the strategy status reflects
+                // a just-confirmed (or just-generated) strategy without a manual
+                // reload — central to the confirm → return → grade flow.
                 onPressed: () =>
-                    context.push('/tasks/${widget.taskId}/strategy'),
+                    context.push('/tasks/${widget.taskId}/strategy').then((_) {
+                      if (mounted) _loadRefs();
+                    }),
                 icon: Icon(hasRefs ? Icons.edit_note : Icons.auto_awesome),
                 label: Text(
                   hasRefs

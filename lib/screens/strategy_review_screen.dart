@@ -288,6 +288,11 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                     child: FilledButton.icon(
                       onPressed: () async {
                         await notifier.saveAllConfirmed(widget.taskId);
+                        // Drop the finished strategy job so the home card stops
+                        // showing "策略已生成，待审核确认" now that it's confirmed.
+                        ref
+                            .read(jobQueueProvider.notifier)
+                            .clear(widget.taskId);
                         if (context.mounted) {
                           context.pushReplacement('/tasks/${widget.taskId}');
                         }

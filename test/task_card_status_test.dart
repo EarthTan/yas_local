@@ -104,6 +104,18 @@ void main() {
       expect(s.label, '已批改 7 / 10 · 继续');
     });
 
+    test('no job, partial done with failures -> surfaces failure count', () {
+      final s = resolveTaskCardStatus(
+        job: null,
+        subject: 'math',
+        subTotal: 10,
+        subDone: 7,
+        subFailed: 3,
+      );
+      expect(s.kind, TaskCardKind.gradingIncomplete);
+      expect(s.label, '已批改 7 / 10（3 失败） · 继续');
+    });
+
     test('no job, nothing graded -> idle', () {
       final s = resolveTaskCardStatus(
         job: null,
