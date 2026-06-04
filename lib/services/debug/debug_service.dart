@@ -211,6 +211,10 @@ class DebugService {
     _enabled = value;
   }
 
+  void addSink(DebugSink sink) {
+    _sinks = [..._sinks, sink];
+  }
+
   void recordQwenCall(QwenCallRecord record) async {
     if (!_enabled) return;
     await _dispatch(record);

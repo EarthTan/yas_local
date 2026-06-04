@@ -292,6 +292,17 @@ void main() {
       expect(a.events, hasLength(1));
     });
   });
+
+  group('addSink', () {
+    test('appends a sink to the dispatch list', () async {
+      DebugService.instance.setEnabled(true);
+      final sink = InMemoryRingSink();
+      DebugService.instance.addSink(sink);
+      DebugService.instance.recordEvent(scope: 's', message: 'x');
+      await Future<void>.delayed(Duration.zero);
+      expect(sink.events, hasLength(1));
+    });
+  });
 }
 
 class _ThrowingSink implements DebugSink {
