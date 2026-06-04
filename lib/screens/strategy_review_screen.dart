@@ -55,15 +55,10 @@ class _S extends ConsumerState<StrategyReviewScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await ref.read(strategyProvider.notifier).load(widget.taskId);
-      if (!mounted) return;
-      final hasRefs = ref.read(strategyProvider).references.isNotEmpty;
-      final job = ref.read(jobQueueProvider)[widget.taskId];
-      final running = job?.phase == JobPhase.running;
-      if (!hasRefs && !running) {
-        ref.read(jobQueueProvider.notifier).startStrategy(widget.taskId);
-      }
+    // Review-only: generation is triggered from the task detail page and runs
+    // in the background. Here we just load whatever has been generated.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(strategyProvider.notifier).load(widget.taskId);
     });
     _refsSub = ref.listenManual<StrategyState>(strategyProvider, (prev, next) {
       final prevLen = prev?.references.length;

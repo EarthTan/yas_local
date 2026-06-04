@@ -78,6 +78,25 @@ class _S extends ConsumerState<TaskDetailScreen> {
     final job = ref.watch(jobQueueProvider)[widget.taskId];
     final gradingRunning =
         job?.kind == JobKind.grading && job?.phase == JobPhase.running;
+    final strategyRunning =
+        job?.kind == JobKind.strategy && job?.phase == JobPhase.running;
+    final strategyFailed =
+        job?.kind == JobKind.strategy && job?.phase == JobPhase.failed;
+    final strategyDone =
+        job?.kind == JobKind.strategy && job?.phase == JobPhase.done;
+    // Strategy refs live in a local cache (not a watched provider), so refresh
+    // them when a strategy job finishes — otherwise this page can't tell the
+    // strategy is now generated while the user stays here watching progress.
+    ref.listen(jobQueueProvider, (prev, next) {
+      final j = next[widget.taskId];
+      final wasRunning = prev?[widget.taskId]?.phase == JobPhase.running;
+      if (j != null &&
+          j.kind == JobKind.strategy &&
+          j.phase != JobPhase.running &&
+          wasRunning) {
+        _loadRefs();
+      }
+    });
 
     // Strategy status
     final refs = _cachedRefs ?? <ReferenceAnswer>[];
@@ -138,47 +157,84 @@ class _S extends ConsumerState<TaskDetailScreen> {
           const SizedBox(height: 8),
           if (_loadingRefs)
             const Center(child: CircularProgressIndicator())
-          else if (!hasRubric)
-            _infoTile(Icons.photo_library, '题目照片已上传，待 AI 识别', Colors.orange)
-          else if (!hasRefs)
-            _infoTile(Icons.auto_awesome, '题目已确认，尚未生成批改策略', Colors.orange)
-          else if (allConfirmed)
-            _infoTile(
-              Icons.check_circle,
-              '批改策略已就绪（${refs.length} 道题均已确认）',
-              Colors.green,
-            )
-          else
-            _infoTile(
-              Icons.pending_actions,
-              '批改策略待完善（${refs.where((r) => r.confirmed).length}/${refs.length} 道题已确认）',
-              Colors.orange,
+          else if (strategyRunning) ...[
+            // Inline generation progress — mirrors the grading progress in the
+            // Results section, so generating no longer needs a spinner screen.
+            Text(
+              '生成批改策略中 ${job!.done} / ${job.total} 题',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
             ),
-          const SizedBox(height: 8),
-          if (!_loadingRefs) ...[
-            if (!hasRubric)
-              OutlinedButton.icon(
-                onPressed: () =>
-                    context.push('/tasks/${widget.taskId}/identify'),
-                icon: const Icon(Icons.find_in_page),
-                label: const Text('识别题目'),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: job.total > 0 ? job.done / job.total : null,
+            ),
+          ] else if (strategyFailed && !hasRefs) ...[
+            _infoTile(
+              Icons.error_outline,
+              job!.error ?? '批改策略生成失败',
+              Colors.red,
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () => ref
+                  .read(jobQueueProvider.notifier)
+                  .startStrategy(widget.taskId),
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试'),
+            ),
+          ] else if (strategyDone && !hasRefs) ...[
+            // Generation just finished; refs are loading from disk. Show a brief
+            // settling state instead of flashing the 生成 button for one frame.
+            _infoTile(Icons.check_circle, '批改策略生成完成，正在载入…', Colors.green),
+          ] else if (!hasRubric) ...[
+            _infoTile(Icons.photo_library, '题目照片已上传，待 AI 识别', Colors.orange),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => context.push('/tasks/${widget.taskId}/identify'),
+              icon: const Icon(Icons.find_in_page),
+              label: const Text('识别题目'),
+            ),
+          ] else if (!hasRefs) ...[
+            _infoTile(Icons.auto_awesome, '题目已确认，尚未生成批改策略', Colors.orange),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              // Start generation as a background job and STAY here; progress
+              // shows inline above, exactly like grading.
+              onPressed: () => ref
+                  .read(jobQueueProvider.notifier)
+                  .startStrategy(widget.taskId),
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('生成批改策略'),
+            ),
+          ] else ...[
+            if (allConfirmed)
+              _infoTile(
+                Icons.check_circle,
+                '批改策略已就绪（${refs.length} 道题均已确认）',
+                Colors.green,
               )
             else
-              OutlinedButton.icon(
-                // Refresh cached refs on return so the strategy status reflects
-                // a just-confirmed (or just-generated) strategy without a manual
-                // reload — central to the confirm → return → grade flow.
-                onPressed: () =>
-                    context.push('/tasks/${widget.taskId}/strategy').then((_) {
-                      if (mounted) _loadRefs();
-                    }),
-                icon: Icon(hasRefs ? Icons.edit_note : Icons.auto_awesome),
-                label: Text(
-                  hasRefs
-                      ? (allConfirmed ? '查看 / 修改批改策略' : '继续完善批改策略')
-                      : '生成批改策略',
-                ),
+              _infoTile(
+                Icons.pending_actions,
+                '批改策略待完善（${refs.where((r) => r.confirmed).length}/${refs.length} 道题已确认）',
+                Colors.orange,
               ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              // Refresh cached refs on return so the status reflects a
+              // just-confirmed strategy without a manual reload.
+              onPressed: () =>
+                  context.push('/tasks/${widget.taskId}/strategy').then((_) {
+                    if (mounted) _loadRefs();
+                  }),
+              icon: const Icon(Icons.edit_note),
+              label: Text(allConfirmed ? '查看 / 修改批改策略' : '继续完善批改策略'),
+            ),
           ],
           const SizedBox(height: 24),
 
