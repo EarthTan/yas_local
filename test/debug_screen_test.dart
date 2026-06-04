@@ -10,7 +10,7 @@ void main() {
     DebugService.instance.setEnabled(true);
   });
 
-  testWidgets('renders DebugScreen with 4 tabs', (tester) async {
+  testWidgets('renders DebugScreen with 5 tabs', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(home: DebugScreen()),
@@ -20,6 +20,7 @@ void main() {
     expect(find.text('事件'), findsOneWidget);
     expect(find.text('状态'), findsOneWidget);
     expect(find.text('JSON 解析'), findsOneWidget);
+    expect(find.text('统计'), findsOneWidget);
   });
 
   testWidgets('Qwen tab shows empty state when no calls', (tester) async {
