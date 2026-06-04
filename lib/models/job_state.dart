@@ -56,8 +56,8 @@ class JobState {
     Object? error = _keep,
     bool? cancelRequested,
     int? attempt,
-    QwenErrorKind? lastErrorKind,
-    String? lastErrorUnit,
+    Object? lastErrorKind = _keep,
+    Object? lastErrorUnit = _keep,
   }) {
     final newPhase = phase ?? this.phase;
     // Retry/feedback fields only make sense while running. Clear them on
@@ -73,8 +73,16 @@ class JobState {
       error: identical(error, _keep) ? this.error : error as String?,
       cancelRequested: cancelRequested ?? this.cancelRequested,
       attempt: terminal ? 0 : (attempt ?? this.attempt),
-      lastErrorKind: terminal ? null : (lastErrorKind ?? this.lastErrorKind),
-      lastErrorUnit: terminal ? null : (lastErrorUnit ?? this.lastErrorUnit),
+      lastErrorKind: terminal
+          ? null
+          : (identical(lastErrorKind, _keep)
+                ? this.lastErrorKind
+                : lastErrorKind as QwenErrorKind?),
+      lastErrorUnit: terminal
+          ? null
+          : (identical(lastErrorUnit, _keep)
+                ? this.lastErrorUnit
+                : lastErrorUnit as String?),
     );
   }
 

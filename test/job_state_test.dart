@@ -59,4 +59,17 @@ void main() {
     final j2 = j.copyWith(attempt: 1);
     expect(j2.cancelRequested, isTrue);
   });
+
+  test('copyWith lastErrorKind: null explicitly clears (regression for ?? sentinel bug)', () {
+    const j = JobState(
+      taskId: 't1',
+      kind: JobKind.grading,
+      lastErrorKind: QwenErrorKind.jsonParse,
+      lastErrorUnit: '第 3 例',
+    );
+    // Same as what _retryWithFeedback does on success.
+    final j2 = j.copyWith(lastErrorKind: null, lastErrorUnit: null);
+    expect(j2.lastErrorKind, isNull);
+    expect(j2.lastErrorUnit, isNull);
+  });
 }
