@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'debug_sink.dart';
+import 'debug_stats.dart';
 import 'in_memory_ring_sink.dart';
 
 /// Status of a Qwen HTTP call as observed by DebugService.
@@ -202,6 +203,9 @@ class DebugService {
       _sinks.whereType<InMemoryRingSink>().firstOrNull;
   StateSnapshot? _stateSnapshot;
 
+  final DebugStats _stats = DebugStats();
+  DebugStats get stats => _stats;
+
   List<QwenCallRecord> get qwenCalls => _memorySink?.qwenCalls ?? const [];
   List<EventRecord> get events => _memorySink?.events ?? const [];
   List<JsonAttemptRecord> get jsonAttempts => _memorySink?.jsonAttempts ?? const [];
@@ -242,6 +246,7 @@ class DebugService {
   }
 
   Future<void> _dispatch(DebugRecord record) async {
+    _stats.record(record);
     for (final sink in _sinks) {
       try {
         await sink.write(record);

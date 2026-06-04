@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/services/debug/debug_sink.dart';
+import 'package:yas_local/services/debug/debug_stats.dart';
 import 'package:yas_local/services/debug/in_memory_ring_sink.dart';
 
 void main() {
@@ -301,6 +302,26 @@ void main() {
       DebugService.instance.recordEvent(scope: 's', message: 'x');
       await Future<void>.delayed(Duration.zero);
       expect(sink.events, hasLength(1));
+    });
+  });
+
+  group('stats integration', () {
+    test('recordQwenCall updates DebugStats', () async {
+      final svc = DebugService.withSinks([InMemoryRingSink()]);
+      svc.setEnabled(true);
+      svc.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'grade',
+        model: 'm',
+        endpoint: '/e',
+        statusCode: 200,
+        elapsedMs: 100,
+        status: QwenCallStatus.ok,
+        messages: const [],
+      ));
+      await Future<void>.delayed(Duration.zero);
+      final snap = svc.stats.snapshot();
+      expect(snap.byScope[DebugScope.grade]!.calls, 1);
     });
   });
 }
