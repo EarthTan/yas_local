@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../models/job_state.dart';
 import '../models/reference_answer.dart';
 import '../models/submission.dart';
 import '../providers/job_queue_provider.dart';
@@ -67,8 +68,16 @@ class _S extends ConsumerState<TaskDetailScreen> {
     }
 
     final totalPoints = task.rubric.fold<int>(0, (sum, r) => sum + r.maxPoints);
-    final gradedCount = subs.where((s) => s.status == SubmissionStatus.done).length;
+    final gradedCount = subs
+        .where((s) => s.status == SubmissionStatus.done)
+        .length;
     final hasGradingResults = gradedCount > 0;
+
+    // Live grading job (background): when running, show inline progress in the
+    // Results section instead of the 开始批改 button.
+    final job = ref.watch(jobQueueProvider)[widget.taskId];
+    final gradingRunning =
+        job?.kind == JobKind.grading && job?.phase == JobPhase.running;
 
     // Strategy status
     final refs = _cachedRefs ?? <ReferenceAnswer>[];
@@ -91,20 +100,33 @@ class _S extends ConsumerState<TaskDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(task.subject,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    task.subject,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   if (hasRubric)
-                    Text('共 ${task.rubric.length} 道题 · 满分 $totalPoints 分',
-                        style: TextStyle(color: Colors.grey[600])),
+                    Text(
+                      '共 ${task.rubric.length} 道题 · 满分 $totalPoints 分',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
                   if (task.questionPaperPaths.isNotEmpty)
-                    Text('题目照片 ${task.questionPaperPaths.length} 张',
-                        style: TextStyle(color: Colors.grey[600])),
+                    Text(
+                      '题目照片 ${task.questionPaperPaths.length} 张',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
                   if (task.answerImagePaths.isNotEmpty)
-                    Text('答案照片 ${task.answerImagePaths.length} 张',
-                        style: TextStyle(color: Colors.grey[600])),
-                  Text('已上传 ${subs.length} 份 · 已批改 $gradedCount 份',
-                      style: TextStyle(color: Colors.grey[600])),
+                    Text(
+                      '答案照片 ${task.answerImagePaths.length} 张',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  Text(
+                    '已上传 ${subs.length} 份 · 已批改 $gradedCount 份',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
                 ],
               ),
             ),
@@ -117,17 +139,9 @@ class _S extends ConsumerState<TaskDetailScreen> {
           if (_loadingRefs)
             const Center(child: CircularProgressIndicator())
           else if (!hasRubric)
-            _infoTile(
-              Icons.photo_library,
-              '题目照片已上传，待 AI 识别',
-              Colors.orange,
-            )
+            _infoTile(Icons.photo_library, '题目照片已上传，待 AI 识别', Colors.orange)
           else if (!hasRefs)
-            _infoTile(
-              Icons.auto_awesome,
-              '题目已确认，尚未生成批改策略',
-              Colors.orange,
-            )
+            _infoTile(Icons.auto_awesome, '题目已确认，尚未生成批改策略', Colors.orange)
           else if (allConfirmed)
             _infoTile(
               Icons.check_circle,
@@ -144,13 +158,15 @@ class _S extends ConsumerState<TaskDetailScreen> {
           if (!_loadingRefs) ...[
             if (!hasRubric)
               OutlinedButton.icon(
-                onPressed: () => context.push('/tasks/${widget.taskId}/identify'),
+                onPressed: () =>
+                    context.push('/tasks/${widget.taskId}/identify'),
                 icon: const Icon(Icons.find_in_page),
                 label: const Text('识别题目'),
               )
             else
               OutlinedButton.icon(
-                onPressed: () => context.push('/tasks/${widget.taskId}/strategy'),
+                onPressed: () =>
+                    context.push('/tasks/${widget.taskId}/strategy'),
                 icon: Icon(hasRefs ? Icons.edit_note : Icons.auto_awesome),
                 label: Text(
                   hasRefs
@@ -166,7 +182,20 @@ class _S extends ConsumerState<TaskDetailScreen> {
           const SizedBox(height: 8),
           if (_loadingRefs)
             const Center(child: CircularProgressIndicator())
-          else
+          else if (gradingRunning) ...[
+            Text(
+              '批改中 ${job!.done} / ${job.total} 份',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: job.total > 0 ? job.done / job.total : null,
+            ),
+          ] else
             ...switch (resolveResultsState(
               allConfirmed: allConfirmed,
               subCount: subs.length,
@@ -174,14 +203,17 @@ class _S extends ConsumerState<TaskDetailScreen> {
             )) {
               ResultsSectionStatus.hasResults => [
                 FilledButton.icon(
-                  onPressed: () => context.push('/tasks/${widget.taskId}/results'),
+                  onPressed: () =>
+                      context.push('/tasks/${widget.taskId}/results'),
                   icon: const Icon(Icons.bar_chart),
                   label: const Text('查看批改结果'),
                 ),
                 if (showRegrade) ...[
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.deepOrange),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.deepOrange,
+                    ),
                     onPressed: _showRegradeDialog,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重新批改'),
@@ -221,17 +253,23 @@ class _S extends ConsumerState<TaskDetailScreen> {
   }
 
   Widget _sectionHeader(String title) => Text(
-        title,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey),
-      );
+    title,
+    style: const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Colors.grey,
+    ),
+  );
 
   Widget _infoTile(IconData icon, String text, Color color) => Row(
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(color: color))),
-        ],
-      );
+    children: [
+      Icon(icon, size: 18, color: color),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(text, style: TextStyle(color: color)),
+      ),
+    ],
+  );
 
   void _showRegradeDialog() {
     showDialog<void>(
@@ -257,7 +295,9 @@ class _S extends ConsumerState<TaskDetailScreen> {
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
             onPressed: () async {
               Navigator.of(ctx).pop();
-              await ref.read(taskProvider.notifier).resetGradingResults(widget.taskId);
+              await ref
+                  .read(taskProvider.notifier)
+                  .resetGradingResults(widget.taskId);
               if (!mounted) return;
               ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
             },
