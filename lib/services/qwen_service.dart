@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import '../models/checkpoint.dart';
 import '../models/identified_question.dart';
@@ -11,6 +13,7 @@ import 'debug_service.dart';
 import 'image_compressor.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';
+import 'qwen_error.dart';
 
 class QuestionGradeResult {
   final int questionNumber;
@@ -452,6 +455,53 @@ class QwenService {
       ));
       rethrow;
     }
+  }
+
+  /// Retry policy for a single Qwen call. `bodyBuilder` is invoked on every
+  /// attempt so we can append [AppPrompts.jsonRetryNudge] to the user-side
+  /// text after a previous JSON parse failure. [extract] parses the response
+  /// text; its thrown [JsonParseException] is what the helper treats as a
+  /// JSON error. HTTP and JSON errors are wrapped in [QwenError] before
+  /// rethrow. Backoff: 1000 * 2^attempt * (0.75 + rand*0.5) ms.
+  ///
+  /// Returns whatever [extract] returns (T).
+  Future<T> _retryingRequest<T>({
+    required String scope,
+    required Map<String, dynamic> Function(int attempt, QwenErrorKind? lastKind)
+        bodyBuilder,
+    required T Function(String content) extract,
+  }) async {
+    const maxAttempts = 3;
+    QwenErrorKind? lastKind;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        final resp = await _dio.post(
+          '/chat/completions',
+          data: bodyBuilder(attempt, lastKind),
+          options: Options(extra: {'_qwen_scope': scope}),
+        );
+        final content =
+            resp.data['choices'][0]['message']['content'] as String;
+        return extract(content);
+      } catch (e) {
+        final q = QwenError.from(e);
+        // 4xx is a hard "stop" — no point retrying 401 / 403 / 404.
+        if (!q.shouldRetry) rethrow;
+        lastKind = q.kind;
+        if (attempt == maxAttempts - 1) rethrow;
+        final delay = _backoffMs(attempt);
+        await Future<void>.delayed(Duration(milliseconds: delay));
+      }
+    }
+    // Unreachable: the loop either returns or rethrows. Belt-and-braces.
+    throw StateError('unreachable: _retryingRequest exhausted');
+  }
+
+  int _backoffMs(int attempt) {
+    // attempt 0 -> ~1s, 1 -> ~2s, 2 -> ~4s (each ±25%).
+    final base = 1000 * (1 << attempt);
+    final jitter = 0.75 + Random().nextDouble() * 0.5;
+    return (base * jitter).round();
   }
 
   ReferenceAnswer _parseReferenceAnswer(
