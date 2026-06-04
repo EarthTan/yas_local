@@ -25,7 +25,7 @@ class InMemoryRingSink implements DebugSink {
   List<JsonAttemptRecord> get jsonAttempts => List.unmodifiable(_jsonAttempts);
 
   @override
-  void write(DebugRecord record) {
+  Future<void> write(DebugRecord record) async {
     if (record is QwenCallRecord) {
       _qwenCalls.add(record);
       if (_qwenCalls.length > qwenCapacity) {

@@ -211,9 +211,9 @@ class DebugService {
     _enabled = value;
   }
 
-  void recordQwenCall(QwenCallRecord record) {
+  void recordQwenCall(QwenCallRecord record) async {
     if (!_enabled) return;
-    _dispatch(record);
+    await _dispatch(record);
   }
 
   void recordEvent({
@@ -221,9 +221,9 @@ class DebugService {
     required String message,
     EventLevel level = EventLevel.info,
     Map<String, Object?>? data,
-  }) {
+  }) async {
     if (!_enabled) return;
-    _dispatch(EventRecord(
+    await _dispatch(EventRecord(
       timestamp: DateTime.now(),
       scope: scope,
       level: level,
@@ -232,15 +232,15 @@ class DebugService {
     ));
   }
 
-  void recordJsonAttempt(JsonAttemptRecord record) {
+  void recordJsonAttempt(JsonAttemptRecord record) async {
     if (!_enabled) return;
-    _dispatch(record);
+    await _dispatch(record);
   }
 
-  void _dispatch(DebugRecord record) {
+  Future<void> _dispatch(DebugRecord record) async {
     for (final sink in _sinks) {
       try {
-        sink.write(record);
+        await sink.write(record);
       } catch (_) {
         // Sinks must not throw, but be defensive.
       }

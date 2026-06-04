@@ -21,7 +21,6 @@ class RollingFileSink implements DebugSink {
   final int maxFileBytes;
 
   IOSink? _sink;
-  int _currentBytes = 0;
   String? _currentFilePath;
   final _writeLock = _Lock();
 
@@ -33,8 +32,8 @@ class RollingFileSink implements DebugSink {
   }
 
   @override
-  void write(DebugRecord record) {
-    _writeLock.synchronized(() async {
+  Future<void> write(DebugRecord record) async {
+    await _writeLock.synchronized(() async {
       try {
         final dir = Directory(directory);
         if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -50,7 +49,18 @@ class RollingFileSink implements DebugSink {
         final json = jsonEncode(record.toJson());
         final bytes = utf8.encode('$json\n');
 
-        if (_currentBytes + bytes.length > maxFileBytes) {
+        // Flush any buffered bytes from the previous write so the on-disk
+        // size we read below reflects what was actually persisted, not just
+        // what's sitting in the IOSink's internal buffer.
+        if (_sink != null) {
+          try {
+            await _sink!.flush();
+          } catch (_) {}
+        }
+        final currentFile = File(_currentFilePath!);
+        final currentSize =
+            currentFile.existsSync() ? currentFile.lengthSync() : 0;
+        if (currentSize + bytes.length > maxFileBytes) {
           await _rotate();
           _currentFilePath = expectedPath;
         }
@@ -58,13 +68,11 @@ class RollingFileSink implements DebugSink {
         final file = File(_currentFilePath!);
         _sink = file.openWrite(mode: FileMode.append);
         _sink!.add(bytes);
-        _currentBytes += bytes.length;
       } catch (_) {
         try {
           await _sink?.close();
         } catch (_) {}
         _sink = null;
-        _currentBytes = 0;
       }
     });
   }
@@ -75,7 +83,6 @@ class RollingFileSink implements DebugSink {
       await _sink?.close();
     } catch (_) {}
     _sink = null;
-    _currentBytes = 0;
 
     final today = _formatDate(DateTime.now());
     final todayPath = p.join(directory, '${baseName}_$today.log');

@@ -11,7 +11,7 @@ abstract class DebugRecord {
 /// from [write] — match the contract of the historical QwenLogger
 /// (`_writeBlock` swallowed I/O errors).
 abstract interface class DebugSink {
-  void write(DebugRecord record);
+  Future<void> write(DebugRecord record);
   Future<void> flush() async {}
   Future<void> close() async {}
 }

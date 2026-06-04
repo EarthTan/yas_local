@@ -14,9 +14,9 @@ void main() {
     expect(sink, isA<DebugSink>());
   });
 
-  test('write must not throw — sinks swallow I/O errors', () {
+  test('write must not throw — sinks swallow I/O errors', () async {
     final sink = _ThrowingSink();
-    expect(() => sink.write(_dummyEvent()), returnsNormally);
+    await sink.write(_dummyEvent());
   });
 
   test('flush defaults to no-op async', () async {
@@ -25,10 +25,10 @@ void main() {
   });
 
   group('InMemoryRingSink', () {
-    test('qwenCalls caps at qwenCapacity, evicting oldest', () {
+    test('qwenCalls caps at qwenCapacity, evicting oldest', () async {
       final sink = InMemoryRingSink(qwenCapacity: 3);
       for (var i = 0; i < 5; i++) {
-        sink.write(QwenCallRecord(
+        await sink.write(QwenCallRecord(
           timestamp: DateTime.now(),
           scope: 'grade',
           model: 'm',
@@ -44,32 +44,32 @@ void main() {
       expect(sink.qwenCalls.first.responseContent, 'call-2');
     });
 
-    test('events cap at eventCapacity, evicting oldest', () {
+    test('events cap at eventCapacity, evicting oldest', () async {
       final sink = InMemoryRingSink(eventCapacity: 2);
-      sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-0'));
-      sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-1'));
-      sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-2'));
+      await sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-0'));
+      await sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-1'));
+      await sink.write(EventRecord(timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'm-2'));
       expect(sink.events.map((e) => e.message).toList(), ['m-1', 'm-2']);
     });
 
-    test('jsonAttempts cap at jsonAttemptCapacity, evicting oldest', () {
+    test('jsonAttempts cap at jsonAttemptCapacity, evicting oldest', () async {
       final sink = InMemoryRingSink(jsonAttemptCapacity: 2);
-      sink.write(JsonAttemptRecord(
+      await sink.write(JsonAttemptRecord(
         timestamp: DateTime.now(), scope: 'x', inputSnippet: 'a', attempts: const [],
       ));
-      sink.write(JsonAttemptRecord(
+      await sink.write(JsonAttemptRecord(
         timestamp: DateTime.now(), scope: 'x', inputSnippet: 'b', attempts: const [],
       ));
-      sink.write(JsonAttemptRecord(
+      await sink.write(JsonAttemptRecord(
         timestamp: DateTime.now(), scope: 'x', inputSnippet: 'c', attempts: const [],
       ));
       expect(sink.jsonAttempts.map((r) => r.inputSnippet).toList(), ['b', 'c']);
     });
 
-    test('write is no-op for unknown record type', () {
+    test('write is no-op for unknown record type', () async {
       final sink = InMemoryRingSink();
       final unknown = _UnknownRecord();
-      expect(() => sink.write(unknown), returnsNormally);
+      await sink.write(unknown);
       expect(sink.qwenCalls, isEmpty);
     });
   });
@@ -88,7 +88,7 @@ void main() {
     test('writes NDJSON lines for QwenCallRecord', () async {
       PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
       final sink = RollingFileSink(directory: '${tempDir.path}/log', baseName: 'test');
-      sink.write(QwenCallRecord(
+      await sink.write(QwenCallRecord(
         timestamp: DateTime(2026, 6, 5, 14, 23),
         scope: 'grade',
         model: 'qwen',
@@ -117,7 +117,7 @@ void main() {
         maxFileBytes: 200,
       );
       for (var i = 0; i < 5; i++) {
-        sink.write(EventRecord(
+        await sink.write(EventRecord(
           timestamp: DateTime(2026, 6, 5, 14, 23, i),
           scope: 's',
           level: EventLevel.info,
@@ -142,11 +142,11 @@ void main() {
         directory: '/nonexistent_root_xyz/that_cannot_be_created/\x00invalid',
         baseName: 'test',
       );
-      expect(
-        () => sink.write(EventRecord(
+      await expectLater(
+        sink.write(EventRecord(
           timestamp: DateTime.now(), scope: 's', level: EventLevel.info, message: 'x',
         )),
-        returnsNormally,
+        completes,
       );
     });
 
@@ -154,6 +154,11 @@ void main() {
       PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
       final sink = RollingFileSink(directory: '${tempDir.path}/log', baseName: 'test');
       await sink.flush();
+      final logDir = Directory('${tempDir.path}/log');
+      final files = logDir.existsSync()
+          ? logDir.listSync().whereType<File>().toList()
+          : <File>[];
+      expect(files, isEmpty);
     });
   });
 }
@@ -177,7 +182,9 @@ class _UnknownRecord implements DebugRecord {
 class _RecordingSink implements DebugSink {
   int writeCount = 0;
   @override
-  void write(DebugRecord record) => writeCount++;
+  Future<void> write(DebugRecord record) async {
+    writeCount++;
+  }
   @override
   Future<void> flush() async {}
   @override
@@ -186,7 +193,7 @@ class _RecordingSink implements DebugSink {
 
 class _ThrowingSink implements DebugSink {
   @override
-  void write(DebugRecord record) {
+  Future<void> write(DebugRecord record) async {
     // Demonstrates the contract: sinks MUST swallow I/O errors
     // rather than letting them bubble up to the caller.
     try {

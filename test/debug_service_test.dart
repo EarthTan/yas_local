@@ -190,7 +190,7 @@ void main() {
       expect(DebugService.instance.changes, isA<Listenable>());
     });
 
-    test('notifies listeners on recordQwenCall', () {
+    test('notifies listeners on recordQwenCall', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
       DebugService.instance.recordQwenCall(QwenCallRecord(
@@ -203,17 +203,22 @@ void main() {
         status: QwenCallStatus.ok,
         messages: const [],
       ));
+      // record* is void async — let the microtask queue drain so the
+      // listener (which fires inside _dispatch after the buffer is updated)
+      // gets a chance to run.
+      await Future<void>.delayed(Duration.zero);
       expect(notified, 1);
     });
 
-    test('notifies listeners on recordEvent', () {
+    test('notifies listeners on recordEvent', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
       DebugService.instance.recordEvent(scope: 's', message: 'm');
+      await Future<void>.delayed(Duration.zero);
       expect(notified, 1);
     });
 
-    test('notifies listeners on recordJsonAttempt', () {
+    test('notifies listeners on recordJsonAttempt', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
       DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
@@ -222,6 +227,7 @@ void main() {
         inputSnippet: 'x',
         attempts: const [],
       ));
+      await Future<void>.delayed(Duration.zero);
       expect(notified, 1);
     });
 
@@ -265,22 +271,24 @@ void main() {
   });
 
   group('withSinks factory', () {
-    test('forwards writes to all sinks', () {
+    test('forwards writes to all sinks', () async {
       final a = InMemoryRingSink();
       final b = InMemoryRingSink();
       final svc = DebugService.withSinks([a, b]);
       svc.setEnabled(true);
       svc.recordEvent(scope: 's', message: 'x');
+      await Future<void>.delayed(Duration.zero);
       expect(a.events, hasLength(1));
       expect(b.events, hasLength(1));
     });
 
-    test('sinks that throw do not break other sinks or the service', () {
+    test('sinks that throw do not break other sinks or the service', () async {
       final a = InMemoryRingSink();
       final b = _ThrowingSink();
       final svc = DebugService.withSinks([b, a]);
       svc.setEnabled(true);
-      expect(() => svc.recordEvent(scope: 's', message: 'x'), returnsNormally);
+      svc.recordEvent(scope: 's', message: 'x');
+      await Future<void>.delayed(Duration.zero);
       expect(a.events, hasLength(1));
     });
   });
@@ -288,7 +296,7 @@ void main() {
 
 class _ThrowingSink implements DebugSink {
   @override
-  void write(DebugRecord record) {
+  Future<void> write(DebugRecord record) async {
     throw Exception('disk full');
   }
 
