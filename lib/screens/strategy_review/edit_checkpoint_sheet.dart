@@ -59,7 +59,10 @@ class _EditCheckpointSheetState extends State<EditCheckpointSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.currentTotal + _points - widget.initialPoints;
+    // currentTotal contract: sum of OTHER checkpoints' points (excluding this one
+    // for edit, or excluding the new one for add). Adding _points gives the
+    // total the question will have once the proposed change is saved.
+    final total = widget.currentTotal + _points;
     final showSumWarning = widget.maxPoints != null && total != widget.maxPoints;
 
     return Padding(

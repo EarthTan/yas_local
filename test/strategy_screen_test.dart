@@ -147,6 +147,57 @@ void main() {
     expect(save.onPressed, isNull);
   });
 
+  testWidgets('EditCheckpointSheet 单个 4 分 checkpoint：合计显示 4（不是 0）', (tester) async {
+    // Bug 1+2：之前公式 currentTotal + _points - initialPoints 在「唯一一个
+    // checkpoint = 4 分」时算出 0 + 4 - 4 = 0，错误地提示「总分不足 4」。
+    // 修正后期望：合计 = 4，与 maxPoints 一致，不显示警告。
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EditCheckpointSheet(
+            mode: EditCheckpointMode.edit,
+            initialDescription: '答对',
+            initialPoints: 4,
+            currentTotal: 0, // sum of OTHER checkpoints (this is the only one)
+            maxPoints: 4,
+            onSave: (_, _) {},
+            onDelete: () {},
+          ),
+        ),
+      ),
+    );
+    // 没有警告。
+    expect(find.textContaining('全部 checkpoint 分值合计'), findsNothing);
+  });
+
+  testWidgets('EditCheckpointSheet 多 checkpoint：合计随 _points 变化', (tester) async {
+    // Bug 1+2：3 个其他 checkpoint 各 1 分（合计 3），当前编辑项初始 1 分。
+    // 修正后期望：合计 = 3 + 1 = 4（与 maxPoints 一致），不显示警告。
+    // 把当前项调到 2 分后，合计应为 3 + 2 = 5（与 maxPoints 不一致，显示警告）。
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EditCheckpointSheet(
+            mode: EditCheckpointMode.edit,
+            initialDescription: 'X',
+            initialPoints: 1,
+            currentTotal: 3,
+            maxPoints: 4,
+            onSave: (_, _) {},
+            onDelete: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('全部 checkpoint 分值合计'), findsNothing);
+
+    // 点 + 把分值调到 2。
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+    expect(find.text('2'), findsOneWidget);
+    expect(find.textContaining('全部 checkpoint 分值合计 = 5'), findsOneWidget);
+  });
+
   testWidgets('EditCheckpointSheet 添加模式没有删除按钮', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
