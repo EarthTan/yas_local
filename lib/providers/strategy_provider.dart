@@ -3,7 +3,6 @@ import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/strategy_message.dart';
-import '../models/task.dart';
 import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_service.dart';
@@ -12,18 +11,12 @@ import 'settings_provider.dart';
 import 'task_provider.dart';
 
 class StrategyState {
-  final bool generating;
-  final int genTotal;
-  final int genDone;
   final String? error;
   final List<ReferenceAnswer> references;
   final bool refining;
   final int? refiningQuestion;
 
   const StrategyState({
-    this.generating = false,
-    this.genTotal = 0,
-    this.genDone = 0,
     this.error,
     this.references = const [],
     this.refining = false,
@@ -36,34 +29,27 @@ class StrategyState {
   int get confirmedCount => references.where((r) => r.confirmed).length;
 
   StrategyState copyWith({
-    bool? generating,
-    int? genTotal,
-    int? genDone,
     Object? error = _keep,
     List<ReferenceAnswer>? references,
     bool? refining,
     Object? refiningQuestion = _keep,
-  }) =>
-      StrategyState(
-        generating: generating ?? this.generating,
-        genTotal: genTotal ?? this.genTotal,
-        genDone: genDone ?? this.genDone,
-        error: identical(error, _keep) ? this.error : error as String?,
-        references: references ?? this.references,
-        refining: refining ?? this.refining,
-        refiningQuestion: identical(refiningQuestion, _keep)
-            ? this.refiningQuestion
-            : refiningQuestion as int?,
-      );
+  }) => StrategyState(
+    error: identical(error, _keep) ? this.error : error as String?,
+    references: references ?? this.references,
+    refining: refining ?? this.refining,
+    refiningQuestion: identical(refiningQuestion, _keep)
+        ? this.refiningQuestion
+        : refiningQuestion as int?,
+  );
 
   static const _keep = Object();
 }
 
 class StrategyNotifier extends StateNotifier<StrategyState> {
   StrategyNotifier(this.ref, {QwenService Function(Ref ref)? qwenFactory})
-      // ignore: prefer_initializing_formals
-      : _qwenFactory = qwenFactory,
-        super(const StrategyState());
+    // ignore: prefer_initializing_formals
+    : _qwenFactory = qwenFactory,
+      super(const StrategyState());
   final Ref ref;
   final QwenService Function(Ref ref)? _qwenFactory;
 
@@ -74,104 +60,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         : QwenService(ref.read(settingsProvider));
   }
 
-  /// Loads existing references from cache; if none, runs Phase 1 generation.
-  Future<void> loadOrGenerate(String taskId) async {
-    final settings = ref.read(settingsProvider);
-    if (!settings.isConfigured) {
-      state = state.copyWith(error: '未配置 API Key，请先到设置填写');
-      return;
-    }
-    final notifier = ref.read(taskProvider.notifier);
-    final task = notifier.taskById(taskId);
-    if (task == null) return;
-
-    // Try loading existing confirmed strategies from cache
+  /// Loads cached references from disk into state (no generation — bulk
+  /// generation is owned by JobQueueNotifier.startStrategy).
+  Future<void> load(String taskId) async {
     final cached = await ReferenceStore.load(taskId);
-    if (cached.isNotEmpty) {
-      state = state.copyWith(references: cached);
-      return;
-    }
-
-    // No cache — generate Phase 1
-    await _generate(taskId, task.rubric, settings, task);
-  }
-
-  Future<void> _generate(
-    String taskId,
-    List<RubricItem> rubric,
-    dynamic settings,
-    GradingTask task,
-  ) async {
-    state = StrategyState(
-      generating: true,
-      genTotal: rubric.length,
-      genDone: 0,
-    );
-
-    DebugService.instance.recordEvent(
-      scope: 'task:$taskId',
-      message: 'strategy generate 开始（${rubric.length} 题）',
-    );
-
-    final qwen = QwenService(settings);
-    final references = <ReferenceAnswer>[];
-    String? firstError;
-
-    for (final item in rubric) {
-      try {
-        final ref = await qwen.generateStrategy(
-          rubricItem: item,
-          questionPaperPaths: task.questionPaperPaths,
-          answerImagePaths: task.answerImagePaths,
-          totalQuestions: rubric.length,
-        );
-        references.add(ref);
-        DebugService.instance.recordEvent(
-          scope: 'task:$taskId / q:${item.questionNumber}',
-          message: '生成 checkpoints（${ref.checkpoints.length} 个）',
-        );
-      } catch (e) {
-        firstError ??= ErrorFormatter.format(e);
-        references.add(ReferenceAnswer(
-          questionNumber: item.questionNumber,
-          checkpoints: [],
-          hasConsensus: false,
-        ));
-        DebugService.instance.recordEvent(
-          scope: 'task:$taskId / q:${item.questionNumber}',
-          message: '生成失败',
-          level: EventLevel.error,
-          data: {'error': e.toString()},
-        );
-      }
-      state = state.copyWith(
-        genDone: state.genDone + 1,
-        references: List.unmodifiable(references),
-      );
-    }
-
-    state = state.copyWith(
-      generating: false,
-      error: firstError,
-      references: List.unmodifiable(references),
-    );
-    DebugService.instance.recordEvent(
-      scope: 'task:$taskId',
-      message: 'strategy generate 结束',
-    );
-  }
-
-  /// Retry generation after an error.
-  Future<void> regenerate(String taskId) async {
-    final settings = ref.read(settingsProvider);
-    if (!settings.isConfigured) {
-      state = state.copyWith(error: '未配置 API Key，请先到设置填写');
-      return;
-    }
-    final notifier = ref.read(taskProvider.notifier);
-    final task = notifier.taskById(taskId);
-    if (task == null) return;
-    await _generate(taskId, task.rubric, settings, task);
+    state = state.copyWith(references: cached);
   }
 
   /// Retry generation for a single question — replaces the cached
@@ -186,7 +79,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     if (task == null) return;
     final rubricItem = task.rubric.firstWhere(
       (r) => r.questionNumber == questionNumber,
-      orElse: () => RubricItem(questionNumber: questionNumber, type: 'subjective', maxPoints: 0),
+      orElse: () => RubricItem(
+        questionNumber: questionNumber,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
     );
     state = state.copyWith(refining: true, refiningQuestion: questionNumber);
     DebugService.instance.recordEvent(
@@ -241,11 +138,17 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   }
 
   /// Send a refinement message for a specific question.
-  Future<void> sendMessage(String taskId, int questionNum, String message) async {
+  Future<void> sendMessage(
+    String taskId,
+    int questionNum,
+    String message,
+  ) async {
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) return;
 
-    final refIndex = state.references.indexWhere((r) => r.questionNumber == questionNum);
+    final refIndex = state.references.indexWhere(
+      (r) => r.questionNumber == questionNum,
+    );
     if (refIndex == -1) return;
     final current = state.references[refIndex];
 
@@ -254,7 +157,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     if (task == null) return;
     final rubricItem = task.rubric.firstWhere(
       (r) => r.questionNumber == questionNum,
-      orElse: () => RubricItem(questionNumber: questionNum, type: 'subjective', maxPoints: 0),
+      orElse: () => RubricItem(
+        questionNumber: questionNum,
+        type: 'subjective',
+        maxPoints: 0,
+      ),
     );
 
     state = state.copyWith(refining: true, refiningQuestion: questionNum);
@@ -284,10 +191,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
       final finalHistory = [
         ...updatedHistory,
-        StrategyMessage(
-          role: 'assistant',
-          content: '已更新批改策略：\n$aiReply',
-        ),
+        StrategyMessage(role: 'assistant', content: '已更新批改策略：\n$aiReply'),
       ];
 
       final newRef = updated.copyWith(
@@ -297,20 +201,30 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
       final newRefs = [...state.references];
       newRefs[refIndex] = newRef;
-      state = state.copyWith(refining: false, refiningQuestion: null, references: newRefs);
+      state = state.copyWith(
+        refining: false,
+        refiningQuestion: null,
+        references: newRefs,
+      );
       DebugService.instance.recordEvent(
         scope: 'task:$taskId / q:$questionNum',
         message: 'refine 完成',
       );
     } catch (e) {
       // On error, still record the user message in history
-      final newRef = current.copyWith(chatHistory: [
-        ...updatedHistory,
-        StrategyMessage(role: 'assistant', content: ErrorFormatter.format(e)),
-      ]);
+      final newRef = current.copyWith(
+        chatHistory: [
+          ...updatedHistory,
+          StrategyMessage(role: 'assistant', content: ErrorFormatter.format(e)),
+        ],
+      );
       final newRefs = [...state.references];
       newRefs[refIndex] = newRef;
-      state = state.copyWith(refining: false, refiningQuestion: null, references: newRefs);
+      state = state.copyWith(
+        refining: false,
+        refiningQuestion: null,
+        references: newRefs,
+      );
       DebugService.instance.recordEvent(
         scope: 'task:$taskId / q:$questionNum',
         message: 'refine 失败',
@@ -330,7 +244,9 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
   void confirmAll() {
     state = state.copyWith(
-      references: state.references.map((r) => r.copyWith(confirmed: true)).toList(),
+      references: state.references
+          .map((r) => r.copyWith(confirmed: true))
+          .toList(),
     );
   }
 
@@ -339,7 +255,10 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     await ReferenceStore.save(taskId, state.references);
   }
 
-  void _updateRef(int questionNum, ReferenceAnswer Function(ReferenceAnswer) update) {
+  void _updateRef(
+    int questionNum,
+    ReferenceAnswer Function(ReferenceAnswer) update,
+  ) {
     final newRefs = state.references.map((r) {
       if (r.questionNumber == questionNum) return update(r);
       return r;
@@ -392,7 +311,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
             r.copyWith(
               checkpoints: [
                 ...r.checkpoints,
-                CheckpointDef(id: newId, description: description, points: points),
+                CheckpointDef(
+                  id: newId,
+                  description: description,
+                  points: points,
+                ),
               ],
             )
           else
@@ -411,7 +334,9 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         for (final r in state.references)
           if (r.questionNumber == questionNumber)
             r.copyWith(
-              checkpoints: r.checkpoints.where((c) => c.id != checkpointId).toList(),
+              checkpoints: r.checkpoints
+                  .where((c) => c.id != checkpointId)
+                  .toList(),
             )
           else
             r,
@@ -422,15 +347,16 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       message: 'removeCheckpoint $checkpointId',
     );
   }
-
 }
 
 /// Test seam: override this provider in tests to inject a fake [QwenService].
 /// Production code resolves to `null` and the notifier falls back to
 /// constructing `QwenService(ref.read(settingsProvider))`.
-final qwenFactoryProvider = Provider<QwenService Function(Ref ref)?>((ref) => null);
+final qwenFactoryProvider = Provider<QwenService Function(Ref ref)?>(
+  (ref) => null,
+);
 
 final strategyProvider =
     StateNotifierProvider.autoDispose<StrategyNotifier, StrategyState>((ref) {
-  return StrategyNotifier(ref, qwenFactory: ref.read(qwenFactoryProvider));
-});
+      return StrategyNotifier(ref, qwenFactory: ref.read(qwenFactoryProvider));
+    });

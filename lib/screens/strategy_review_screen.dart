@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../models/checkpoint.dart';
+import '../models/job_state.dart';
 import '../models/reference_answer.dart';
 import '../models/rubric.dart';
+import '../providers/job_queue_provider.dart';
 import '../providers/strategy_provider.dart';
 import '../providers/task_provider.dart';
 import '../services/debug_service.dart';
@@ -25,8 +27,9 @@ import 'strategy_review/question_page.dart';
 /// [strategyProvider] notifier — sibling widgets stay purely presentational.
 ///
 /// Renders one of three loading states before the page list is ready:
-/// `generating` (spinner + per-question progress), `error + empty refs`
-/// (red error block with a regenerate button), and `refs.isEmpty` (spinner).
+/// a running strategy job (spinner + per-question progress read from the job),
+/// `job/state error + empty refs` (red error block with a retry button that
+/// calls [JobQueueNotifier.startStrategy]), and `refs.isEmpty` (spinner).
 ///
 /// When every reference is confirmed, an extra "完成" button appears under
 /// the action bar; tapping it calls [StrategyNotifier.saveAllConfirmed] and
@@ -52,23 +55,27 @@ class _S extends ConsumerState<StrategyReviewScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(strategyProvider.notifier).loadOrGenerate(widget.taskId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await ref.read(strategyProvider.notifier).load(widget.taskId);
+      if (!mounted) return;
+      final hasRefs = ref.read(strategyProvider).references.isNotEmpty;
+      final job = ref.read(jobQueueProvider)[widget.taskId];
+      final running = job?.phase == JobPhase.running;
+      if (!hasRefs && !running) {
+        ref.read(jobQueueProvider.notifier).startStrategy(widget.taskId);
+      }
     });
-    _refsSub = ref.listenManual<StrategyState>(
-      strategyProvider,
-      (prev, next) {
-        final prevLen = prev?.references.length;
-        final nextLen = next.references.length;
-        if (prevLen != nextLen) {
-          DebugService.instance.recordEvent(
-            scope: 'strategy / task:${widget.taskId}',
-            message: 'refs.length: $prevLen → $nextLen',
-            data: {'prev': prevLen, 'next': nextLen},
-          );
-        }
-      },
-    );
+    _refsSub = ref.listenManual<StrategyState>(strategyProvider, (prev, next) {
+      final prevLen = prev?.references.length;
+      final nextLen = next.references.length;
+      if (prevLen != nextLen) {
+        DebugService.instance.recordEvent(
+          scope: 'strategy / task:${widget.taskId}',
+          message: 'refs.length: $prevLen → $nextLen',
+          data: {'prev': prevLen, 'next': nextLen},
+        );
+      }
+    });
   }
 
   @override
@@ -100,14 +107,33 @@ class _S extends ConsumerState<StrategyReviewScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(strategyProvider);
+    final job = ref.watch(jobQueueProvider)[widget.taskId];
+    final strategyRunning =
+        job?.kind == JobKind.strategy && job?.phase == JobPhase.running;
+    ref.listen(jobQueueProvider, (prev, next) {
+      // Reload refs only on a strategy job's running -> terminal transition
+      // (when startStrategy has just persisted them), not on every tick.
+      final j = next[widget.taskId];
+      final wasRunning = prev?[widget.taskId]?.phase == JobPhase.running;
+      if (j != null &&
+          j.kind == JobKind.strategy &&
+          j.phase != JobPhase.running &&
+          wasRunning) {
+        ref.read(strategyProvider.notifier).load(widget.taskId);
+      }
+    });
     final notifier = ref.read(strategyProvider.notifier);
     final task = ref.read(taskProvider.notifier).taskById(widget.taskId);
     final refs = state.references;
 
     final isLast = _currentIndex >= refs.length - 1;
-    final currentRef = refs.isEmpty ? null : refs[_currentIndex.clamp(0, refs.length - 1)];
+    final currentRef = refs.isEmpty
+        ? null
+        : refs[_currentIndex.clamp(0, refs.length - 1)];
 
-    if (state.generating && refs.isEmpty) {
+    if (strategyRunning && refs.isEmpty) {
+      final done = job?.done ?? 0;
+      final total = job?.total ?? 0;
       return Scaffold(
         appBar: AppBar(title: const Text('批改策略')),
         body: Center(
@@ -116,16 +142,19 @@ class _S extends ConsumerState<StrategyReviewScreen> {
             children: [
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
-              Text('正在生成第 ${state.genDone + 1}/${state.genTotal} 题的批改策略...'),
+              Text(
+                '正在生成第 ${done + 1}/$total 题的批改策略...',
+                style: const TextStyle(color: Colors.black87),
+              ),
               const SizedBox(height: 12),
-              if (state.genTotal > 0)
-                LinearProgressIndicator(value: state.genDone / state.genTotal),
+              if (total > 0) LinearProgressIndicator(value: done / total),
             ],
           ),
         ),
       );
     }
-    if (state.error != null && refs.isEmpty) {
+    final jobError = job?.phase == JobPhase.failed ? job?.error : null;
+    if ((jobError ?? state.error) != null && refs.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: const Text('批改策略')),
         body: Padding(
@@ -135,11 +164,16 @@ class _S extends ConsumerState<StrategyReviewScreen> {
             children: [
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
-              SelectableText(state.error!,
-                  style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
+              SelectableText(
+                (jobError ?? state.error)!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: () => notifier.regenerate(widget.taskId),
+                onPressed: () => ref
+                    .read(jobQueueProvider.notifier)
+                    .startStrategy(widget.taskId),
                 icon: const Icon(Icons.refresh),
                 label: const Text('重试'),
               ),
@@ -199,7 +233,8 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   questionType: rubricItem?.type == 'objective' ? '客观题' : '主观题',
                   onEditCheckpoint: (id, cp) => _openEditSheet(r, id, cp),
                   onAddCheckpoint: () => _openAddSheet(r),
-                  onRetry: () => notifier.retryGenerate(widget.taskId, r.questionNumber),
+                  onRetry: () =>
+                      notifier.retryGenerate(widget.taskId, r.questionNumber),
                 );
               },
             ),
@@ -211,11 +246,16 @@ class _S extends ConsumerState<StrategyReviewScreen> {
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (state.error != null)
+                // Bulk generation failures surface on the job (jobError); chat
+                // refine failures surface on state.error. Either drives the banner.
+                if (state.error != null || jobError != null)
                   Container(
                     width: double.infinity,
                     color: Colors.orange.shade50,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     child: Text(
                       '部分题目生成失败，可重新确认后继续',
                       style: TextStyle(color: Colors.orange[800], fontSize: 12),
@@ -225,7 +265,9 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                 BottomActionBar(
                   confirmed: currentRef.confirmed,
                   isLast: isLast,
-                  isRefining: state.refining && state.refiningQuestion == currentRef.questionNumber,
+                  isRefining:
+                      state.refining &&
+                      state.refiningQuestion == currentRef.questionNumber,
                   onRefine: () => _openChatSheet(currentRef),
                   onConfirm: () {
                     if (currentRef.confirmed) {
@@ -252,7 +294,9 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                       },
                       icon: const Icon(Icons.check),
                       label: const Text('完成'),
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
                     ),
                   ),
               ],
@@ -272,8 +316,8 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     );
     final questionLabel =
         (rubricItem != null && rubricItem.questionText.isNotEmpty)
-            ? rubricItem.questionText
-            : '第 ${refAnswer.questionNumber} 题';
+        ? rubricItem.questionText
+        : '第 ${refAnswer.questionNumber} 题';
     ChatSheet.show(
       context,
       taskId: widget.taskId,
@@ -305,14 +349,23 @@ class _S extends ConsumerState<StrategyReviewScreen> {
         initialDescription: cp.description,
         initialPoints: cp.points,
         currentTotal:
-            refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points) - cp.points,
+            refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points) -
+            cp.points,
         maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
         onSave: (desc, points) {
-          ref.read(strategyProvider.notifier)
-              .editCheckpoint(refAnswer.questionNumber, id, description: desc, points: points);
+          ref
+              .read(strategyProvider.notifier)
+              .editCheckpoint(
+                refAnswer.questionNumber,
+                id,
+                description: desc,
+                points: points,
+              );
         },
         onDelete: () {
-          ref.read(strategyProvider.notifier).removeCheckpoint(refAnswer.questionNumber, id);
+          ref
+              .read(strategyProvider.notifier)
+              .removeCheckpoint(refAnswer.questionNumber, id);
         },
       ),
     );
@@ -326,11 +379,19 @@ class _S extends ConsumerState<StrategyReviewScreen> {
         mode: EditCheckpointMode.add,
         initialDescription: '',
         initialPoints: 1,
-        currentTotal: refAnswer.checkpoints.fold<int>(0, (s, c) => s + c.points),
+        currentTotal: refAnswer.checkpoints.fold<int>(
+          0,
+          (s, c) => s + c.points,
+        ),
         maxPoints: _rubricMaxPoints(refAnswer.questionNumber),
         onSave: (desc, points) {
-          ref.read(strategyProvider.notifier)
-              .addCheckpoint(refAnswer.questionNumber, description: desc, points: points);
+          ref
+              .read(strategyProvider.notifier)
+              .addCheckpoint(
+                refAnswer.questionNumber,
+                description: desc,
+                points: points,
+              );
         },
       ),
     );
