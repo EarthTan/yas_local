@@ -283,7 +283,10 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
     );
   }
 
-  Future<void> startStrategy(String taskId) async {
+  Future<void> startStrategy(
+    String taskId, {
+    Iterable<int>? onlyQuestions,
+  }) async {
     if (_isRunning(taskId)) return;
 
     final settings = ref.read(settingsProvider);
@@ -303,26 +306,37 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       return;
     }
 
+    final rubricToRun = onlyQuestions == null
+        ? task.rubric
+        : task.rubric
+              .where((r) => onlyQuestions.contains(r.questionNumber))
+              .toList();
+
     _set(
       taskId,
       JobState(
         taskId: taskId,
         kind: JobKind.strategy,
-        total: task.rubric.length,
+        total: rubricToRun.length,
         done: 0,
       ),
     );
 
+    if (rubricToRun.isEmpty) {
+      _patch(taskId, (j) => j.copyWith(phase: JobPhase.done));
+      return;
+    }
+
     DebugService.instance.recordEvent(
       scope: 'task:$taskId',
-      message: 'strategy generate 开始（${task.rubric.length} 题）',
+      message: 'strategy generate 开始（${rubricToRun.length} 题）',
     );
 
     final qwen = _newQwen();
-    final results = List<ReferenceAnswer?>.filled(task.rubric.length, null);
+    final results = List<ReferenceAnswer?>.filled(rubricToRun.length, null);
 
     try {
-      await runPool(task.rubric, maxConcurrency, (item, i) async {
+      await runPool(rubricToRun, maxConcurrency, (item, i) async {
         if (state[taskId]?.cancelRequested ?? false) return;
         try {
           results[i] = await _retryWithFeedback<ReferenceAnswer>(
@@ -354,8 +368,24 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       });
 
       // Skip slots left null by a cancel, then persist the whole batch once.
-      final refs = [for (final r in results) ?r];
-      await ReferenceStore.save(taskId, refs);
+      final newRefs = [for (final r in results) ?r];
+      if (onlyQuestions == null) {
+        await ReferenceStore.save(taskId, newRefs);
+      } else {
+        // Merge: keep every reference NOT in the new batch untouched, then
+        // overwrite with the freshly-generated ones. Confirmed flags and
+        // chat history on non-failed questions are preserved.
+        final existing = await ReferenceStore.load(taskId);
+        final newByNum = {for (final r in newRefs) r.questionNumber: r};
+        final merged = [
+          for (final r in existing) newByNum[r.questionNumber] ?? r,
+          // If a "rerun" produced a reference for a questionNumber not in the
+          // existing set, append it at the end.
+          for (final r in newRefs)
+            if (!existing.any((e) => e.questionNumber == r.questionNumber)) r,
+        ];
+        await ReferenceStore.save(taskId, merged);
+      }
 
       _patch(taskId, (j) {
         final phase = j.failedCount > 0 ? JobPhase.failed : JobPhase.done;

@@ -168,6 +168,17 @@ class _S extends ConsumerState<TaskDetailScreen> {
                 color: Colors.black87,
               ),
             ),
+            if (job.attempt > 0 && job.lastErrorKind != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '⟳ ${job.lastErrorUnit ?? "当前题"} · 重试 ${job.attempt}/3 · ${job.lastErrorKind!.displayName}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.deepOrange,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: job.total > 0 ? job.done / job.total : null,
@@ -235,6 +246,36 @@ class _S extends ConsumerState<TaskDetailScreen> {
               icon: const Icon(Icons.edit_note),
               label: Text(allConfirmed ? '查看 / 修改批改策略' : '继续完善批改策略'),
             ),
+            if (job != null &&
+                (job.phase == JobPhase.done || job.phase == JobPhase.failed) &&
+                refs.where((r) => r.checkpoints.isEmpty).isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  border: Border.all(color: Colors.red.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber, color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${refs.where((r) => r.checkpoints.isEmpty).length} 题生成失败',
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _rerunFailedStrategy(),
+                      child: const Text('重跑失败题'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 24),
 
@@ -252,6 +293,17 @@ class _S extends ConsumerState<TaskDetailScreen> {
                 color: Colors.black87,
               ),
             ),
+            if (job.attempt > 0 && job.lastErrorKind != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '⟳ ${job.lastErrorUnit ?? "当前例"} · 重试 ${job.attempt}/3 · ${job.lastErrorKind!.displayName}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.deepOrange,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: job.total > 0 ? job.done / job.total : null,
@@ -278,6 +330,37 @@ class _S extends ConsumerState<TaskDetailScreen> {
                     onPressed: _showRegradeDialog,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重新批改'),
+                  ),
+                ],
+                if (job != null &&
+                    (job.phase == JobPhase.done ||
+                        job.phase == JobPhase.failed) &&
+                    job.failedCount > 0) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      border: Border.all(color: Colors.red.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber, color: Colors.red, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${job.failedCount} 份失败',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                        OutlinedButton(
+                          onPressed: () => _rerunFailedGrading(),
+                          child: const Text('重跑失败项'),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ],
@@ -367,5 +450,30 @@ class _S extends ConsumerState<TaskDetailScreen> {
         ],
       ),
     );
+  }
+
+  void _rerunFailedGrading() async {
+    // Reset only the failed submissions to pending; submissions already done
+    // stay done. startGrading's existing filter (status != done) takes care
+    // of the rest.
+    final subs = ref.read(taskProvider.notifier).submissionsFor(widget.taskId);
+    for (final s in subs.where((s) => s.status == SubmissionStatus.failed)) {
+      await ref.read(taskProvider.notifier).updateSubmission(
+            s.copyWith(status: SubmissionStatus.pending, items: []),
+          );
+    }
+    await ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
+  }
+
+  void _rerunFailedStrategy() async {
+    final refs = _cachedRefs ?? await ReferenceStore.load(widget.taskId);
+    final failedNums = refs
+        .where((r) => r.checkpoints.isEmpty)
+        .map((r) => r.questionNumber)
+        .toList();
+    if (failedNums.isEmpty) return;
+    await ref
+        .read(jobQueueProvider.notifier)
+        .startStrategy(widget.taskId, onlyQuestions: failedNums);
   }
 }
