@@ -5,6 +5,7 @@ import '../models/reference_answer.dart';
 import '../models/submission.dart';
 import '../services/debug_service.dart';
 import '../services/error_formatter.dart';
+import '../services/qwen_error.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
 import '../services/run_pool.dart';
@@ -44,6 +45,51 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
   }
 
   void _set(String taskId, JobState job) => state = {...state, taskId: job};
+
+  /// Wrap a per-unit Qwen call so the user sees the retry attempt count and
+  /// the error class. QwenService has already done up to 3 internal retries;
+  /// this layer does NOT add a second retry loop — it only propagates the
+  /// attempt number to JobState, records a DebugService event, and rethrows
+  /// the classified [QwenError]. Cancellation: if [cancelRequested] is set
+  /// when the helper is entered, the action is skipped and a [StateError]
+  /// is thrown so the per-unit call still bumps `done` and exits cleanly.
+  Future<T> _retryWithFeedback<T>({
+    required String taskId,
+    required String unitLabel,
+    required Future<T> Function() action,
+  }) async {
+    if (state[taskId]?.cancelRequested ?? false) {
+      throw StateError('cancelled');
+    }
+    _patch(taskId, (j) => j.copyWith(
+          attempt: 1,
+          lastErrorKind: null,
+          lastErrorUnit: unitLabel,
+        ));
+    try {
+      final result = await action();
+      _patch(taskId, (j) => j.copyWith(
+            attempt: 0,
+            lastErrorKind: null,
+            lastErrorUnit: null,
+          ));
+      return result;
+    } catch (e) {
+      final q = QwenError.from(e);
+      _patch(taskId, (j) => j.copyWith(
+            attempt: 0, // terminal failure of this unit; keep the kind/unit
+            lastErrorKind: q.kind,
+            lastErrorUnit: unitLabel,
+          ));
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId',
+        message: 'retry failed ($unitLabel, ${q.kind.name})',
+        level: EventLevel.error,
+        data: {'unit': unitLabel, 'kind': q.kind.name},
+      );
+      rethrow;
+    }
+  }
 
   /// Removes a finished job so its card status reverts to derived/idle.
   void clear(String taskId) {
