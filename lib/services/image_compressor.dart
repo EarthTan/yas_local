@@ -1,6 +1,9 @@
 import 'dart:io';
 
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
+
+import 'debug_service.dart';
 
 /// Longest-edge clamp for VLM-facing images. Qwen VL scales inputs down
 /// internally; overshooting 1600 wastes bandwidth with no quality win.
@@ -57,10 +60,66 @@ class ImageCompressor {
   /// first call and reusing the cache on subsequent calls (in-process and
   /// cross-process). On any failure returns [srcPath] unchanged.
   static Future<String> compressedPathFor(String srcPath) async {
-    if (!File(srcPath).existsSync()) return srcPath;
-    // Decode/resize/encode is added in Task 3 of this plan. The Task 2
-    // body intentionally returns srcPath so the existing-fail / naming
-    // tests pass without depending on the image package.
-    return srcPath;
+    final existing = _inflight[srcPath];
+    if (existing != null) return existing;
+
+    final fut = _doCompress(srcPath).whenComplete(() {
+      // Keep completed results in the map for the rest of the process;
+      // _doCompress handles failure by returning srcPath.
+    });
+    _inflight[srcPath] = fut;
+    return fut;
+  }
+
+  static Future<String> _doCompress(String srcPath) async {
+    final srcFile = File(srcPath);
+    if (!srcFile.existsSync()) return srcPath;
+    final cachePath = cachePathFor(srcPath);
+
+    // Reuse a previously-written cache file (cross-process reuse).
+    if (File(cachePath).existsSync()) return cachePath;
+
+    try {
+      final raw = await srcFile.readAsBytes();
+      final decoded = img.decodeImage(raw);
+      if (decoded == null) {
+        DebugService.instance.recordEvent(
+          scope: 'compress',
+          message: 'decode returned null, fallback to original',
+          level: EventLevel.warn,
+          data: {'src': srcPath},
+        );
+        return srcPath;
+      }
+      // Always re-encode to JPEG at longest edge 1600. For images whose
+      // longest edge is already exactly 1600, copyResize is a no-op; for
+      // smaller ones it's an upscale (VLM input is robust to upsampling);
+      // for larger ones it's a downscale.
+      final resized = decoded.width >= decoded.height
+          ? img.copyResize(
+              decoded,
+              width: _kMaxEdge,
+              maintainAspect: true,
+              interpolation: img.Interpolation.linear,
+            )
+          : img.copyResize(
+              decoded,
+              height: _kMaxEdge,
+              maintainAspect: true,
+              interpolation: img.Interpolation.linear,
+            );
+      final jpg = img.encodeJpg(resized, quality: _kJpegQuality);
+      await File(cachePath).parent.create(recursive: true);
+      await File(cachePath).writeAsBytes(jpg);
+      return cachePath;
+    } catch (e) {
+      DebugService.instance.recordEvent(
+        scope: 'compress',
+        message: 'compress failed, fallback to original',
+        level: EventLevel.warn,
+        data: {'src': srcPath, 'error': e.toString()},
+      );
+      return srcPath;
+    }
   }
 }
