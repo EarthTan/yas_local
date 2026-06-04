@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:yas_local/services/debug/debug_service.dart';
-import 'package:yas_local/screens/debug_screen.dart';
+import 'package:yas_local/screens/debug/debug_screen.dart';
 
 void main() {
   setUp(() {
@@ -16,10 +16,10 @@ void main() {
         child: MaterialApp(home: DebugScreen()),
       ),
     );
-    expect(find.text('Qwen'), findsOneWidget);
+    expect(find.text('Qwen 调用'), findsOneWidget);
     expect(find.text('事件'), findsOneWidget);
     expect(find.text('状态'), findsOneWidget);
-    expect(find.text('JSON'), findsOneWidget);
+    expect(find.text('JSON 解析'), findsOneWidget);
   });
 
   testWidgets('Qwen tab shows empty state when no calls', (tester) async {
@@ -60,7 +60,7 @@ void main() {
         child: MaterialApp(home: DebugScreen()),
       ),
     );
-    await tester.tap(find.text('JSON'));
+    await tester.tap(find.text('JSON 解析'));
     await tester.pumpAndSettle();
     expect(find.text('暂无 JSON 解析记录'), findsOneWidget);
   });

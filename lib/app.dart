@@ -5,7 +5,7 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/create_task_screen.dart';
 import 'screens/capture_screen.dart';
-import 'screens/debug_screen.dart';
+import 'screens/debug/debug_screen.dart';
 import 'screens/identify_screen.dart';
 import 'screens/results_screen.dart';
 import 'screens/paper_detail_screen.dart';
