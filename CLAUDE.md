@@ -186,6 +186,7 @@ This list is intentionally non-exhaustive — only the files that materially sha
 - `prompts.dart` — `AppPrompts` static methods, all LLM prompt templates live here. Edit here to tune prompts.
 - `json_extractor.dart` — `JsonExtractor` + `JsonParseException` + `ExtractionResult`/`ExtractionListResult`. The only place that parses response bodies.
 - `debug/debug_service.dart` — `DebugService` singleton + record types (QwenCallRecord, EventRecord, JsonAttemptRecord). Routes records through a `List<DebugSink>`. See "Debug sink architecture" above.
+- `debug/debug_sink.dart` — `DebugSink` interface (`write` / `flush` / `close`).
 - `debug/in_memory_ring_sink.dart` — `InMemoryRingSink`, the default in-memory sink on `DebugService.instance`.
 - `debug/rolling_file_sink.dart` — `RollingFileSink`, NDJSON + 5MB rotation sink; added at app startup via `DebugService.instance.addSink(...)` in `main.dart`.
 - `debug/debug_stats.dart` — `DebugStats` with O(1) per-scope counters and percentile snapshot.
