@@ -111,4 +111,64 @@ void main() {
       expect(out.height, 1600);
     });
   });
+
+  group('ImageCompressor.compressedPathFor — dedup & cache', () {
+    late Directory tmp;
+
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('yas_imgcomp_dedup_');
+    });
+
+    tearDown(() {
+      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+    });
+
+    Future<String> writePng(String name, int w, int h) async {
+      final im = img.Image(width: w, height: h);
+      im.clear(img.ColorRgb8(50, 150, 50));
+      final bytes = img.encodePng(im);
+      final f = File('${tmp.path}/$name.png');
+      await f.writeAsBytes(bytes);
+      return f.path;
+    }
+
+    test('in-flight: 10 concurrent calls → 1 decode, same cache file', () async {
+      final src = await writePng('concurrent', 2000, 1500);
+
+      final results = await Future.wait(
+        List.generate(10, (_) => ImageCompressor.compressedPathFor(src)),
+      );
+      // All paths identical and equal to the cache path.
+      final unique = results.toSet();
+      expect(unique.length, 1);
+      final cachePath = unique.first;
+      expect(File(cachePath).existsSync(), isTrue);
+    });
+
+    test('cross-process reuse: pre-existing cache file is returned', () async {
+      final src = await writePng('preexisting', 2400, 1800);
+      // Pre-create the cache file so the second call must hit the
+      // "file already exists" branch without invoking copyResize.
+      final cachePath = ImageCompressor.cachePathFor(src);
+      final placeholder = img.Image(width: 10, height: 10);
+      placeholder.clear(img.ColorRgb8(0, 0, 0));
+      await File(cachePath).parent.create(recursive: true);
+      await File(cachePath).writeAsBytes(img.encodeJpg(placeholder));
+
+      final result = await ImageCompressor.compressedPathFor(src);
+      expect(result, cachePath);
+      // The placeholder is still 10x10 — proves copyResize was not called.
+      final onDisk = img.decodeImage(File(cachePath).readAsBytesSync())!;
+      expect(onDisk.width, 10);
+      expect(onDisk.height, 10);
+    });
+
+    test('different srcPaths produce different cache files', () async {
+      final a = await writePng('a', 2000, 2000);
+      final b = await writePng('b', 2000, 2000);
+      final ra = await ImageCompressor.compressedPathFor(a);
+      final rb = await ImageCompressor.compressedPathFor(b);
+      expect(ra, isNot(rb));
+    });
+  });
 }
