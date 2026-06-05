@@ -237,7 +237,7 @@ class QwenService {
         : rubric.questionText;
 
     // Build multi-turn messages: system context first, then prior history, then new user message
-    final messages = <Map<String, dynamic>>[
+    final baseMessages = <Map<String, dynamic>>[
       {
         'role': 'user',
         'content': AppPrompts.refineStrategySystem(
@@ -254,36 +254,53 @@ class QwenService {
       {'role': 'user', 'content': userMessage},
     ];
 
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': messages,
-      },
-      options: Options(extra: {'_qwen_scope': 'refine'}),
-    );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
-      return _parseReferenceAnswer(
-        current.questionNumber,
-        payload.json,
-        reasoning: payload.reasoning,
+    // Lightweight one-shot retry: if the first response fails JSON parsing,
+    // re-send with the new user turn appended with jsonRetryNudge. We don't
+    // go through _retryingRequest because the multi-turn message structure
+    // doesn't match its bodyBuilder contract.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final messages = attempt == 0
+          ? baseMessages
+          : <Map<String, dynamic>>[
+              ...baseMessages.sublist(0, baseMessages.length - 1),
+              {
+                'role': 'user',
+                'content': userMessage + AppPrompts.jsonRetryNudge,
+              },
+            ];
+      final resp = await _dio.post(
+        '/chat/completions',
+        data: {
+          'model': settings.vlModel,
+          'messages': messages,
+        },
+        options: Options(extra: {'_qwen_scope': 'refine'}),
       );
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'refine',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
-        errorMessage: e.toString(),
-      ));
-      rethrow;
+      final content = resp.data['choices'][0]['message']['content'] as String;
+      try {
+        final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
+        return _parseReferenceAnswer(
+          current.questionNumber,
+          payload.json,
+          reasoning: payload.reasoning,
+        );
+      } on JsonParseException catch (e) {
+        DebugService.instance.recordQwenCall(QwenCallRecord(
+          timestamp: DateTime.now(),
+          scope: 'refine',
+          model: settings.vlModel,
+          endpoint: '/chat/completions',
+          statusCode: resp.statusCode,
+          elapsedMs: 0,
+          status: QwenCallStatus.parseError,
+          messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
+          errorMessage: e.toString(),
+        ));
+        if (attempt == 1) rethrow;
+      }
     }
+    // Unreachable: the loop either returns or rethrows.
+    throw StateError('unreachable: refineStrategy retry loop exhausted');
   }
 
   Future<List<IdentifiedQuestion>> identifyQuestions(List<String> imagePaths) async {
