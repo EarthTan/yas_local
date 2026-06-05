@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import '../models/checkpoint.dart';
 import '../models/identified_question.dart';
@@ -11,6 +13,7 @@ import 'debug/debug_service.dart';
 import 'image_compressor.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';
+import 'qwen_error.dart';
 
 class QuestionGradeResult {
   final int questionNumber;
@@ -151,6 +154,7 @@ class QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     final imageContent = <Map<String, dynamic>>[];
 
@@ -181,54 +185,43 @@ class QwenService {
     }
 
     final countCtx = totalQuestions > 0 ? '（作业共有 $totalQuestions 道题）' : '';
-
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.generateStrategy(
-                  questionNumber: rubricItem.questionNumber,
-                  maxPoints: rubricItem.maxPoints,
-                  questionText: rubricItem.questionText,
-                  hasAnswerImages: answerImagePaths.isNotEmpty,
-                  countCtx: countCtx,
-                ),
-              },
-            ],
-          }
-        ],
-      },
-      options: Options(extra: {'_qwen_scope': 'strategy'}),
+    final userText = AppPrompts.generateStrategy(
+      questionNumber: rubricItem.questionNumber,
+      maxPoints: rubricItem.maxPoints,
+      questionText: rubricItem.questionText,
+      hasAnswerImages: answerImagePaths.isNotEmpty,
+      countCtx: countCtx,
     );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'strategy');
-      return _parseReferenceAnswer(
-        rubricItem.questionNumber,
-        payload.json,
-        reasoning: payload.reasoning,
-      );
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'strategy',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
-    }
+
+    return _retryingRequest<ReferenceAnswer>(
+      scope: 'strategy',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
+      },
+      extract: (content) {
+        final payload = JsonExtractor.requireObjectWithReasoning(
+          content,
+          scope: 'strategy',
+        );
+        return _parseReferenceAnswer(
+          rubricItem.questionNumber,
+          payload.json,
+          reasoning: payload.reasoning,
+        );
+      },
+      onAttempt: onAttempt,
+    );
   }
 
   Future<ReferenceAnswer> refineStrategy({
@@ -311,47 +304,36 @@ class QwenService {
       });
     }
 
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.identifyQuestions(),
-              },
-            ],
-          }
-        ],
+    final userText = AppPrompts.identifyQuestions();
+
+    return _retryingRequest<List<IdentifiedQuestion>>(
+      scope: 'identify',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
       },
-      options: Options(extra: {'_qwen_scope': 'identify'}),
+      extract: (content) {
+        final payload = JsonExtractor.requireListWithReasoning(
+          content,
+          fromKey: 'questions',
+          scope: 'identify',
+        );
+        // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
+        return payload.list
+            .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
+            .toList();
+      },
     );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireListWithReasoning(content,
-          fromKey: 'questions', scope: 'identify');
-      // reasoning 丢弃：题型识别是中间步骤，不暴露给老师
-      return payload.list
-          .map((q) => IdentifiedQuestion.fromJson(q as Map<String, dynamic>))
-          .toList();
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'identify',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
-    }
   }
 
   Future<List<QuestionGradeResult>> gradePaper({
@@ -359,6 +341,7 @@ class QwenService {
     required List<String> questionPaperPaths,
     required List<RubricItem> rubric,
     required List<ReferenceAnswer> refs,
+    void Function(int attempt)? onAttempt,
   }) async {
     final refByNum = {for (final r in refs) r.questionNumber: r};
 
@@ -394,64 +377,111 @@ class QwenService {
       'image_url': {'url': 'data:${_mimeType(compressedStudentPath)};base64,$studentB64'},
     });
 
-    final resp = await _dio.post(
-      '/chat/completions',
-      data: {
-        'model': settings.vlModel,
-        'messages': [
-          {
-            'role': 'user',
-            'content': [
-              ...imageContent,
-              {
-                'type': 'text',
-                'text': AppPrompts.gradePaper(strategyText: strategyText),
-              },
-            ],
-          }
-        ],
+    final userText = AppPrompts.gradePaper(strategyText: strategyText);
+
+    return _retryingRequest<List<QuestionGradeResult>>(
+      scope: 'grade',
+      bodyBuilder: (attempt, lastKind) {
+        final text = lastKind == QwenErrorKind.jsonParse
+            ? userText + AppPrompts.jsonRetryNudge
+            : userText;
+        return {
+          'model': settings.vlModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [...imageContent, {'type': 'text', 'text': text}],
+            },
+          ],
+        };
       },
-      options: Options(extra: {'_qwen_scope': 'grade'}),
-    );
-    final content = resp.data['choices'][0]['message']['content'] as String;
-    try {
-      final payload = JsonExtractor.requireListWithReasoning(content,
-          fromKey: 'questions', scope: 'grade');
-      // reasoning 丢弃：批改的思考过程不暴露给学生/老师
-      return payload.list.map((q) {
-        final qNum = q['number'] is int
-            ? q['number'] as int
-            : int.tryParse(q['number'].toString()) ?? 0;
-        final cps = (q['checkpoints'] as List? ?? [])
-            .map((c) => CheckpointResult(
-                  description: (c['description'] ?? '').toString(),
-                  passed: c['passed'] as bool? ?? false,
-                  pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-                  reason: (c['reason'] ?? '').toString(),
-                ))
-            .toList();
-        return QuestionGradeResult(
-          questionNumber: qNum,
-          extractedAnswer: (q['extracted_answer'] ?? '').toString(),
-          checkpoints: cps,
-          confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
-          overallComment: q['overall_comment'] as String?,
+      extract: (content) {
+        final payload = JsonExtractor.requireListWithReasoning(
+          content,
+          fromKey: 'questions',
+          scope: 'grade',
         );
-      }).toList();
-    } on JsonParseException catch (e) {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
-        timestamp: DateTime.now(),
-        scope: 'grade',
-        model: settings.vlModel,
-        endpoint: '/chat/completions',
-        statusCode: resp.statusCode,
-        elapsedMs: 0,
-        status: QwenCallStatus.parseError,
-        messages: const [], // already recorded by interceptor; not duplicating
-        errorMessage: e.toString(),
-      ));
-      rethrow;
+        // reasoning 丢弃：批改的思考过程不暴露给学生/老师
+        return payload.list.map((q) {
+          final qNum = q['number'] is int
+              ? q['number'] as int
+              : int.tryParse(q['number'].toString()) ?? 0;
+          final cps = (q['checkpoints'] as List? ?? [])
+              .map((c) => CheckpointResult(
+                    description: (c['description'] ?? '').toString(),
+                    passed: c['passed'] as bool? ?? false,
+                    pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
+                    reason: (c['reason'] ?? '').toString(),
+                  ))
+              .toList();
+          return QuestionGradeResult(
+            questionNumber: qNum,
+            extractedAnswer: (q['extracted_answer'] ?? '').toString(),
+            checkpoints: cps,
+            confidence: (q['confidence'] as num?)?.toDouble() ?? 0.8,
+            overallComment: q['overall_comment'] as String?,
+          );
+        }).toList();
+      },
+      onAttempt: onAttempt,
+    );
+  }
+
+  /// Retry policy for a single Qwen call. `bodyBuilder` is invoked on every
+  /// attempt so we can append [AppPrompts.jsonRetryNudge] to the user-side
+  /// text after a previous JSON parse failure. [extract] parses the response
+  /// text; its thrown [JsonParseException] is what the helper treats as a
+  /// JSON error. HTTP and JSON errors are wrapped in [QwenError] before
+  /// rethrow. Backoff: 1000 * 2^attempt * (0.75 + rand*0.5) ms.
+  ///
+  /// [onAttempt] (optional) is invoked synchronously at the start of each
+  /// loop iteration with the 0-indexed attempt number (0, 1, 2). It is the
+  /// caller's responsibility to translate this to a 1-based label for UI.
+  /// It is intended for progress reporting (e.g. JobQueueNotifier updating
+  /// JobState.attempt) and is called BEFORE the network request, so the
+  /// observed value reflects an attempt that is *about* to fire, not one
+  /// that has finished.
+  ///
+  /// Returns whatever [extract] returns (T).
+  Future<T> _retryingRequest<T>({
+    required String scope,
+    required Map<String, dynamic> Function(int attempt, QwenErrorKind? lastKind)
+        bodyBuilder,
+    required T Function(String content) extract,
+    void Function(int attempt)? onAttempt,
+  }) async {
+    const maxAttempts = 3;
+    QwenErrorKind? lastKind;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      onAttempt?.call(attempt);
+      try {
+        final resp = await _dio.post(
+          '/chat/completions',
+          data: bodyBuilder(attempt, lastKind),
+          options: Options(extra: {'_qwen_scope': scope}),
+        );
+        final content =
+            resp.data['choices'][0]['message']['content'] as String;
+        return extract(content);
+      } catch (e) {
+        final q = QwenError.from(e);
+        // 4xx is a hard "stop" — no point retrying 401 / 403 / 404.
+        if (!q.shouldRetry) throw q;
+        lastKind = q.kind;
+        if (attempt == maxAttempts - 1) throw q;
+        final delay = _backoffMs(attempt);
+        await Future<void>.delayed(Duration(milliseconds: delay));
+      }
     }
+    // Unreachable: the loop either returns or rethrows. Belt-and-braces.
+    throw StateError('unreachable: _retryingRequest exhausted');
+  }
+
+  int _backoffMs(int attempt) {
+    // attempt 0 -> ~1s, 1 -> ~2s, 2 -> ~4s (each ±25%).
+    final base = 1000 * (1 << attempt);
+    final jitter = 0.75 + Random().nextDouble() * 0.5;
+    return (base * jitter).round();
   }
 
   ReferenceAnswer _parseReferenceAnswer(

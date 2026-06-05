@@ -6,6 +6,7 @@ import '../models/submission.dart';
 import '../providers/job_queue_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/task_provider.dart';
+import '../services/qwen_error.dart';
 import '../widgets/debug_entry_button.dart';
 
 enum TaskCardKind {
@@ -24,11 +25,13 @@ class TaskCardStatus {
   final String label;
   final double? progress; // 0..1 -> determinate bar; null -> none/indeterminate
   final bool indeterminate;
+  final String? retryHint; // null = don't render the retry line
   const TaskCardStatus(
     this.kind,
     this.label, {
     this.progress,
     this.indeterminate = false,
+    this.retryHint,
   });
 }
 
@@ -43,6 +46,8 @@ TaskCardStatus resolveTaskCardStatus({
   required int subTotal,
   required int subDone,
   required int subFailed,
+  QwenErrorKind? retryKind,
+  int retryAttempt = 0,
 }) {
   if (job != null && job.phase == JobPhase.running) {
     if (job.kind == JobKind.strategy) {
@@ -51,6 +56,7 @@ TaskCardStatus resolveTaskCardStatus({
         '生成批改策略中 ${job.done} / ${job.total}',
         progress: job.total > 0 ? job.done / job.total : null,
         indeterminate: job.total == 0,
+        retryHint: _retryHint(retryAttempt, retryKind),
       );
     }
     return TaskCardStatus(
@@ -58,6 +64,7 @@ TaskCardStatus resolveTaskCardStatus({
       '批改中 ${job.done} / ${job.total}',
       progress: job.total > 0 ? job.done / job.total : null,
       indeterminate: job.total == 0,
+      retryHint: _retryHint(retryAttempt, retryKind),
     );
   }
   if (job != null && job.phase == JobPhase.failed && job.failedCount > 0) {
@@ -65,22 +72,29 @@ TaskCardStatus resolveTaskCardStatus({
       return TaskCardStatus(
         TaskCardKind.strategyFailed,
         '策略生成失败 ${job.failedCount} 题 · 点击重试',
+        retryHint: _retryHint(retryAttempt, retryKind),
       );
     }
     return TaskCardStatus(
       TaskCardKind.gradingFailed,
       '批改完成，${job.failedCount} 份失败 · 点击重试',
+      retryHint: _retryHint(retryAttempt, retryKind),
     );
   }
   if (job != null &&
       job.phase == JobPhase.done &&
       job.kind == JobKind.strategy) {
-    return const TaskCardStatus(TaskCardKind.strategyDone, '策略已生成，待审核确认');
+    return TaskCardStatus(
+      TaskCardKind.strategyDone,
+      '策略已生成，待审核确认',
+      retryHint: _retryHint(retryAttempt, retryKind),
+    );
   }
   if (subTotal > 0 && subDone == subTotal) {
     return TaskCardStatus(
       TaskCardKind.gradingComplete,
       '批改完成 $subDone / $subTotal',
+      retryHint: _retryHint(retryAttempt, retryKind),
     );
   }
   if (subDone > 0 && subDone < subTotal) {
@@ -88,9 +102,21 @@ TaskCardStatus resolveTaskCardStatus({
     return TaskCardStatus(
       TaskCardKind.gradingIncomplete,
       '已批改 $subDone / $subTotal$failTag · 继续',
+      retryHint: _retryHint(retryAttempt, retryKind),
     );
   }
-  return TaskCardStatus(TaskCardKind.idle, '$subject · $subTotal 份');
+  return TaskCardStatus(
+    TaskCardKind.idle,
+    '$subject · $subTotal 份',
+    retryHint: _retryHint(retryAttempt, retryKind),
+  );
+}
+
+/// Build the small orange retry line shown on the home card when an attempt
+/// is in flight. Returns null when there is nothing useful to say.
+String? _retryHint(int retryAttempt, QwenErrorKind? retryKind) {
+  if (retryAttempt <= 0 || retryKind == null) return null;
+  return '⟳ 重试 $retryAttempt/3 · ${retryKind.displayName}';
 }
 
 Color _statusColor(TaskCardKind kind) => switch (kind) {
@@ -161,6 +187,8 @@ class HomeScreen extends ConsumerWidget {
                                     (s) => s.status == SubmissionStatus.failed,
                                   )
                                   .length,
+                              retryKind: jobs[t.id]?.lastErrorKind,
+                              retryAttempt: jobs[t.id]?.attempt ?? 0,
                             );
                             return ListTile(
                               title: Text(
@@ -183,6 +211,17 @@ class HomeScreen extends ConsumerWidget {
                                       value: status.indeterminate
                                           ? null
                                           : status.progress,
+                                    ),
+                                  ],
+                                  if (status.retryHint != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      status.retryHint!,
+                                      style: const TextStyle(
+                                        color: Colors.deepOrange,
+                                        fontSize: 12,
+                                        fontStyle: FontStyle.italic,
+                                      ),
                                     ),
                                   ],
                                 ],

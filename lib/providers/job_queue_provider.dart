@@ -5,6 +5,7 @@ import '../models/reference_answer.dart';
 import '../models/submission.dart';
 import '../services/debug/debug_service.dart';
 import '../services/error_formatter.dart';
+import '../services/qwen_error.dart';
 import '../services/qwen_service.dart';
 import '../services/reference_store.dart';
 import '../services/run_pool.dart';
@@ -44,6 +45,70 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
   }
 
   void _set(String taskId, JobState job) => state = {...state, taskId: job};
+
+  /// Wrap a per-unit Qwen call so the user sees the retry attempt count and
+  /// the error class. QwenService has already done up to 3 internal retries;
+  /// this layer does NOT add a second retry loop — it only propagates the
+  /// attempt number to JobState, records a DebugService event, and rethrows
+  /// the classified [QwenError]. Cancellation: if [cancelRequested] is set
+  /// when the helper is entered, the action is skipped and a [StateError]
+  /// is thrown so the per-unit call still bumps `done` and exits cleanly.
+  ///
+  /// [onAttempt] (optional) is invoked from inside [action] with the inner
+  /// helper's 0-indexed attempt number. We translate that to a 1-based label
+  /// (1..3) and update JobState.attempt so the UI's "重试 X/3" reflects the
+  /// actual in-flight attempt. Patches after a cancel are still safe — the
+  /// terminal-phase guard in [JobState.copyWith] only fires once phase has
+  /// transitioned, not from a stale cancelRequested read here.
+  Future<T> _retryWithFeedback<T>({
+    required String taskId,
+    required String unitLabel,
+    required Future<T> Function(void Function(int attempt)? onAttempt) action,
+  }) async {
+    if (state[taskId]?.cancelRequested ?? false) {
+      throw StateError('cancelled');
+    }
+    _patch(taskId, (j) => j.copyWith(
+          attempt: 1,
+          lastErrorKind: null,
+          lastErrorUnit: unitLabel,
+        ));
+    try {
+      final result = await action((innerAttempt) {
+        // Forward inner attempt progress to the JobState. 1-based for UI.
+        // Ignore updates that arrive after cancellation so we don't fight
+        // the terminal phase guard.
+        if (state[taskId]?.cancelRequested ?? false) return;
+        _patch(taskId, (j) => j.copyWith(attempt: innerAttempt + 1));
+      });
+      _patch(taskId, (j) => j.copyWith(
+            attempt: 0,
+            lastErrorKind: null,
+            lastErrorUnit: null,
+          ));
+      return result;
+    } catch (e) {
+      final q = QwenError.from(e);
+      _patch(taskId, (j) => j.copyWith(
+            attempt: 0, // terminal failure of this unit; keep the kind/unit
+            lastErrorKind: q.kind,
+            lastErrorUnit: unitLabel,
+          ));
+      DebugService.instance.recordEvent(
+        scope: 'task:$taskId',
+        message: 'retry failed ($unitLabel, ${q.kind.name})',
+        level: EventLevel.error,
+        data: {'unit': unitLabel, 'kind': q.kind.name},
+      );
+      rethrow;
+    }
+  }
+
+  /// 1-based position of [sub] in [targets] (the user-visible order on the
+  /// task card), independent of `runPool` processing order. O(n) but the
+  /// targets list is small and this runs once per unit.
+  int subIndexOf(List<Submission> targets, Submission sub) =>
+      targets.indexOf(sub);
 
   /// Removes a finished job so its card status reverts to derived/idle.
   void clear(String taskId) {
@@ -126,11 +191,16 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
             sub.copyWith(status: SubmissionStatus.processing),
           );
 
-          final grades = await qwen.gradePaper(
-            imagePath: sub.imagePath!,
-            questionPaperPaths: task.questionPaperPaths,
-            rubric: task.rubric,
-            refs: references,
+          final grades = await _retryWithFeedback<List<QuestionGradeResult>>(
+            taskId: taskId,
+            unitLabel: '第 ${subIndexOf(targets, sub) + 1} 例',
+            action: (onAttempt) => qwen.gradePaper(
+              imagePath: sub.imagePath!,
+              questionPaperPaths: task.questionPaperPaths,
+              rubric: task.rubric,
+              refs: references,
+              onAttempt: onAttempt,
+            ),
           );
           final gradeByNum = {for (final g in grades) g.questionNumber: g};
 
@@ -227,7 +297,10 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
     );
   }
 
-  Future<void> startStrategy(String taskId) async {
+  Future<void> startStrategy(
+    String taskId, {
+    Iterable<int>? onlyQuestions,
+  }) async {
     if (_isRunning(taskId)) return;
 
     final settings = ref.read(settingsProvider);
@@ -247,33 +320,49 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       return;
     }
 
+    final rubricToRun = onlyQuestions == null
+        ? task.rubric
+        : task.rubric
+              .where((r) => onlyQuestions.contains(r.questionNumber))
+              .toList();
+
     _set(
       taskId,
       JobState(
         taskId: taskId,
         kind: JobKind.strategy,
-        total: task.rubric.length,
+        total: rubricToRun.length,
         done: 0,
       ),
     );
 
+    if (rubricToRun.isEmpty) {
+      _patch(taskId, (j) => j.copyWith(phase: JobPhase.done));
+      return;
+    }
+
     DebugService.instance.recordEvent(
       scope: 'task:$taskId',
-      message: 'strategy generate 开始（${task.rubric.length} 题）',
+      message: 'strategy generate 开始（${rubricToRun.length} 题）',
     );
 
     final qwen = _newQwen();
-    final results = List<ReferenceAnswer?>.filled(task.rubric.length, null);
+    final results = List<ReferenceAnswer?>.filled(rubricToRun.length, null);
 
     try {
-      await runPool(task.rubric, maxConcurrency, (item, i) async {
+      await runPool(rubricToRun, maxConcurrency, (item, i) async {
         if (state[taskId]?.cancelRequested ?? false) return;
         try {
-          results[i] = await qwen.generateStrategy(
-            rubricItem: item,
-            questionPaperPaths: task.questionPaperPaths,
-            answerImagePaths: task.answerImagePaths,
-            totalQuestions: task.rubric.length,
+          results[i] = await _retryWithFeedback<ReferenceAnswer>(
+            taskId: taskId,
+            unitLabel: '第 ${item.questionNumber} 题',
+            action: (onAttempt) => qwen.generateStrategy(
+              rubricItem: item,
+              questionPaperPaths: task.questionPaperPaths,
+              answerImagePaths: task.answerImagePaths,
+              totalQuestions: task.rubric.length,
+              onAttempt: onAttempt,
+            ),
           );
           _patch(taskId, (j) => j.copyWith(done: j.done + 1));
         } catch (e) {
@@ -294,8 +383,24 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       });
 
       // Skip slots left null by a cancel, then persist the whole batch once.
-      final refs = [for (final r in results) ?r];
-      await ReferenceStore.save(taskId, refs);
+      final newRefs = [for (final r in results) ?r];
+      if (onlyQuestions == null) {
+        await ReferenceStore.save(taskId, newRefs);
+      } else {
+        // Merge: keep every reference NOT in the new batch untouched, then
+        // overwrite with the freshly-generated ones. Confirmed flags and
+        // chat history on non-failed questions are preserved.
+        final existing = await ReferenceStore.load(taskId);
+        final newByNum = {for (final r in newRefs) r.questionNumber: r};
+        final merged = [
+          for (final r in existing) newByNum[r.questionNumber] ?? r,
+          // If a "rerun" produced a reference for a questionNumber not in the
+          // existing set, append it at the end.
+          for (final r in newRefs)
+            if (!existing.any((e) => e.questionNumber == r.questionNumber)) r,
+        ];
+        await ReferenceStore.save(taskId, merged);
+      }
 
       _patch(taskId, (j) {
         final phase = j.failedCount > 0 ? JobPhase.failed : JobPhase.done;

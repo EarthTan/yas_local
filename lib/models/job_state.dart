@@ -1,3 +1,5 @@
+import 'package:yas_local/services/qwen_error.dart' show QwenErrorKind;
+
 /// Which long-running AI loop a job represents.
 enum JobKind { strategy, grading }
 
@@ -20,6 +22,18 @@ class JobState {
   final String? error; // first error encountered, already Chinese-formatted
   final bool cancelRequested;
 
+  /// 0 = no retry in flight; 1..3 = the in-progress retry attempt number.
+  /// Always 0 when [phase] is [JobPhase.done] or [JobPhase.failed] —
+  /// [copyWith] and the constructor enforce that.
+  final int attempt;
+
+  /// Snapshot of the most recent error class observed during this job.
+  /// UI shows the *last* failure only; full history is owned by DebugService.
+  final QwenErrorKind? lastErrorKind;
+
+  /// Human label for the unit that was retrying, e.g. "第 12 例" or "第 3 题".
+  final String? lastErrorUnit;
+
   const JobState({
     required this.taskId,
     required this.kind,
@@ -29,6 +43,9 @@ class JobState {
     this.failedCount = 0,
     this.error,
     this.cancelRequested = false,
+    this.attempt = 0,
+    this.lastErrorKind,
+    this.lastErrorUnit,
   });
 
   JobState copyWith({
@@ -38,17 +55,36 @@ class JobState {
     int? failedCount,
     Object? error = _keep,
     bool? cancelRequested,
-  }) =>
-      JobState(
-        taskId: taskId,
-        kind: kind,
-        phase: phase ?? this.phase,
-        total: total ?? this.total,
-        done: done ?? this.done,
-        failedCount: failedCount ?? this.failedCount,
-        error: identical(error, _keep) ? this.error : error as String?,
-        cancelRequested: cancelRequested ?? this.cancelRequested,
-      );
+    int? attempt,
+    Object? lastErrorKind = _keep,
+    Object? lastErrorUnit = _keep,
+  }) {
+    final newPhase = phase ?? this.phase;
+    // Retry/feedback fields only make sense while running. Clear them on
+    // transition to a terminal phase so stale "正在重试" UI doesn't linger.
+    final terminal = newPhase == JobPhase.done || newPhase == JobPhase.failed;
+    return JobState(
+      taskId: taskId,
+      kind: kind,
+      phase: newPhase,
+      total: total ?? this.total,
+      done: done ?? this.done,
+      failedCount: failedCount ?? this.failedCount,
+      error: identical(error, _keep) ? this.error : error as String?,
+      cancelRequested: cancelRequested ?? this.cancelRequested,
+      attempt: terminal ? 0 : (attempt ?? this.attempt),
+      lastErrorKind: terminal
+          ? null
+          : (identical(lastErrorKind, _keep)
+                ? this.lastErrorKind
+                : lastErrorKind as QwenErrorKind?),
+      lastErrorUnit: terminal
+          ? null
+          : (identical(lastErrorUnit, _keep)
+                ? this.lastErrorUnit
+                : lastErrorUnit as String?),
+    );
+  }
 
   static const _keep = Object();
 }

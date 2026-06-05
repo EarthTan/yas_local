@@ -56,6 +56,7 @@ class _OkQwen extends QwenService {
     required List<String> questionPaperPaths,
     required List<RubricItem> rubric,
     required List<ReferenceAnswer> refs,
+    void Function(int attempt)? onAttempt,
   }) async {
     calls++;
     return const [
@@ -84,6 +85,7 @@ class _ThrowQwen extends QwenService {
     required List<String> questionPaperPaths,
     required List<RubricItem> rubric,
     required List<ReferenceAnswer> refs,
+    void Function(int attempt)? onAttempt,
   }) async => throw Exception('grade boom');
 }
 
@@ -99,6 +101,7 @@ class _CancelOnFirstQwen extends QwenService {
     required List<String> questionPaperPaths,
     required List<RubricItem> rubric,
     required List<ReferenceAnswer> refs,
+    void Function(int attempt)? onAttempt,
   }) async {
     calls++;
     if (calls == 1) _onFirst();
@@ -129,6 +132,7 @@ class _StrategyOkQwen extends QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     calls++;
     return ReferenceAnswer(
