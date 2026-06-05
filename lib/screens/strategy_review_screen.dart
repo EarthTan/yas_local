@@ -144,7 +144,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
               Text(
-                '正在生成第 ${done + 1}/$total 题的批改策略...',
+                '正在生成第 $done/$total 题的批改策略...',
                 style: const TextStyle(color: Colors.black87),
               ),
               const SizedBox(height: 12),
