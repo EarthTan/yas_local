@@ -154,6 +154,7 @@ class QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     final imageContent = <Map<String, dynamic>>[];
 
@@ -219,6 +220,7 @@ class QwenService {
           reasoning: payload.reasoning,
         );
       },
+      onAttempt: onAttempt,
     );
   }
 
@@ -339,6 +341,7 @@ class QwenService {
     required List<String> questionPaperPaths,
     required List<RubricItem> rubric,
     required List<ReferenceAnswer> refs,
+    void Function(int attempt)? onAttempt,
   }) async {
     final refByNum = {for (final r in refs) r.questionNumber: r};
 
@@ -420,6 +423,7 @@ class QwenService {
           );
         }).toList();
       },
+      onAttempt: onAttempt,
     );
   }
 
@@ -430,16 +434,26 @@ class QwenService {
   /// JSON error. HTTP and JSON errors are wrapped in [QwenError] before
   /// rethrow. Backoff: 1000 * 2^attempt * (0.75 + rand*0.5) ms.
   ///
+  /// [onAttempt] (optional) is invoked synchronously at the start of each
+  /// loop iteration with the 0-indexed attempt number (0, 1, 2). It is the
+  /// caller's responsibility to translate this to a 1-based label for UI.
+  /// It is intended for progress reporting (e.g. JobQueueNotifier updating
+  /// JobState.attempt) and is called BEFORE the network request, so the
+  /// observed value reflects an attempt that is *about* to fire, not one
+  /// that has finished.
+  ///
   /// Returns whatever [extract] returns (T).
   Future<T> _retryingRequest<T>({
     required String scope,
     required Map<String, dynamic> Function(int attempt, QwenErrorKind? lastKind)
         bodyBuilder,
     required T Function(String content) extract,
+    void Function(int attempt)? onAttempt,
   }) async {
     const maxAttempts = 3;
     QwenErrorKind? lastKind;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      onAttempt?.call(attempt);
       try {
         final resp = await _dio.post(
           '/chat/completions',

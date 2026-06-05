@@ -35,6 +35,7 @@ class _ThrowingQwenService extends QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     throw Exception('boom');
   }
@@ -51,6 +52,7 @@ class _FakeSuccessfulQwenService extends QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     return ReferenceAnswer(
       questionNumber: rubricItem.questionNumber,

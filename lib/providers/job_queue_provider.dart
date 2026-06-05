@@ -53,10 +53,17 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
   /// the classified [QwenError]. Cancellation: if [cancelRequested] is set
   /// when the helper is entered, the action is skipped and a [StateError]
   /// is thrown so the per-unit call still bumps `done` and exits cleanly.
+  ///
+  /// [onAttempt] (optional) is invoked from inside [action] with the inner
+  /// helper's 0-indexed attempt number. We translate that to a 1-based label
+  /// (1..3) and update JobState.attempt so the UI's "重试 X/3" reflects the
+  /// actual in-flight attempt. Patches after a cancel are still safe — the
+  /// terminal-phase guard in [JobState.copyWith] only fires once phase has
+  /// transitioned, not from a stale cancelRequested read here.
   Future<T> _retryWithFeedback<T>({
     required String taskId,
     required String unitLabel,
-    required Future<T> Function() action,
+    required Future<T> Function(void Function(int attempt)? onAttempt) action,
   }) async {
     if (state[taskId]?.cancelRequested ?? false) {
       throw StateError('cancelled');
@@ -67,7 +74,13 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
           lastErrorUnit: unitLabel,
         ));
     try {
-      final result = await action();
+      final result = await action((innerAttempt) {
+        // Forward inner attempt progress to the JobState. 1-based for UI.
+        // Ignore updates that arrive after cancellation so we don't fight
+        // the terminal phase guard.
+        if (state[taskId]?.cancelRequested ?? false) return;
+        _patch(taskId, (j) => j.copyWith(attempt: innerAttempt + 1));
+      });
       _patch(taskId, (j) => j.copyWith(
             attempt: 0,
             lastErrorKind: null,
@@ -181,11 +194,12 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
           final grades = await _retryWithFeedback<List<QuestionGradeResult>>(
             taskId: taskId,
             unitLabel: '第 ${subIndexOf(targets, sub) + 1} 例',
-            action: () => qwen.gradePaper(
+            action: (onAttempt) => qwen.gradePaper(
               imagePath: sub.imagePath!,
               questionPaperPaths: task.questionPaperPaths,
               rubric: task.rubric,
               refs: references,
+              onAttempt: onAttempt,
             ),
           );
           final gradeByNum = {for (final g in grades) g.questionNumber: g};
@@ -342,11 +356,12 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
           results[i] = await _retryWithFeedback<ReferenceAnswer>(
             taskId: taskId,
             unitLabel: '第 ${item.questionNumber} 题',
-            action: () => qwen.generateStrategy(
+            action: (onAttempt) => qwen.generateStrategy(
               rubricItem: item,
               questionPaperPaths: task.questionPaperPaths,
               answerImagePaths: task.answerImagePaths,
               totalQuestions: task.rubric.length,
+              onAttempt: onAttempt,
             ),
           );
           _patch(taskId, (j) => j.copyWith(done: j.done + 1));

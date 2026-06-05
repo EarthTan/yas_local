@@ -40,6 +40,7 @@ class _StrategyForQ3Only extends QwenService {
     required List<String> questionPaperPaths,
     required List<String> answerImagePaths,
     int totalQuestions = 0,
+    void Function(int attempt)? onAttempt,
   }) async {
     calls.add(rubricItem.questionNumber);
     return ReferenceAnswer(
