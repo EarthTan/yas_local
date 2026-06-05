@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/settings.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 import '../services/settings_store.dart';
 
 class SettingsNotifier extends StateNotifier<AppSettings> {

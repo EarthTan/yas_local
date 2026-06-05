@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yas_local/models/settings.dart';
-import 'package:yas_local/services/debug_service.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/services/qwen_error.dart';
 import 'package:yas_local/services/qwen_service.dart';
 
@@ -55,6 +55,9 @@ void main() {
     svc.dio.httpClientAdapter = _MockAdapter(_okJson);
 
     await svc.identifyQuestions(const []); // empty list, will still send
+    // The Dio interceptor's recordQwenCall is fire-and-forget; drain the
+    // microtask queue so the buffer reflects the captured call.
+    await Future<void>.delayed(Duration.zero);
 
     final calls = DebugService.instance.qwenCalls;
     expect(calls, hasLength(1));

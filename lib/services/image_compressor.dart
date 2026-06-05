@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
-import 'debug_service.dart';
+import 'debug/debug_service.dart';
 
 /// Longest-edge clamp for VLM-facing images. Qwen VL scales inputs down
 /// internally; overshooting 1600 wastes bandwidth with no quality win.

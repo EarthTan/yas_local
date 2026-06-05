@@ -9,7 +9,7 @@ import '../models/reference_answer.dart';
 import '../models/rubric.dart';
 import '../models/settings.dart';
 import '../models/strategy_message.dart';
-import 'debug_service.dart';
+import 'debug/debug_service.dart';
 import 'image_compressor.dart';
 import 'json_extractor.dart';
 import 'prompts.dart';

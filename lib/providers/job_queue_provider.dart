@@ -3,7 +3,7 @@ import '../models/checkpoint.dart';
 import '../models/job_state.dart';
 import '../models/reference_answer.dart';
 import '../models/submission.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 import '../services/error_formatter.dart';
 import '../services/qwen_error.dart';
 import '../services/qwen_service.dart';

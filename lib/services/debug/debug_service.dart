@@ -1,5 +1,9 @@
 import 'package:flutter/foundation.dart';
 
+import 'debug_sink.dart';
+import 'debug_stats.dart';
+import 'in_memory_ring_sink.dart';
+
 /// Status of a Qwen HTTP call as observed by DebugService.
 enum QwenCallStatus {
   /// HTTP 2xx, response received and parsed successfully.
@@ -17,7 +21,8 @@ enum EventLevel { info, warn, error }
 
 /// One Qwen HTTP call. Captured by the Dio interceptor in QwenService
 /// (status ok/httpError) and by the calling method's try/catch (status parseError).
-class QwenCallRecord {
+class QwenCallRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope; // 'identify' | 'strategy' | 'refine' | 'grade'
   final String model;
@@ -43,10 +48,39 @@ class QwenCallRecord {
     this.reasoningContent,
     this.errorMessage,
   });
+
+  @override
+  String get recordType => 'qwen_call';
+
+  String get displayName => switch (scope) {
+        'identify' => '题目识别',
+        'strategy' => '策略生成',
+        'refine' => '策略优化',
+        'grade' => '批改',
+        _ => scope,
+      };
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'model': model,
+        'endpoint': endpoint,
+        'statusCode': statusCode,
+        'elapsedMs': elapsedMs,
+        'status': status.name,
+        'messages': messages,
+        'responseContent': responseContent,
+        'reasoningContent': reasoningContent,
+        'errorMessage': errorMessage,
+      };
 }
 
+
 /// One process event from a provider (identification / strategy / grading).
-class EventRecord {
+class EventRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope;
   final EventLevel level;
@@ -60,6 +94,19 @@ class EventRecord {
     required this.message,
     this.data,
   });
+
+  @override
+  String get recordType => 'event';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'level': level.name,
+        'message': message,
+        'data': data,
+      };
 }
 
 /// A single parsing attempt within JsonExtractor.
@@ -76,7 +123,8 @@ class JsonAttempt {
 }
 
 /// One JSON extraction. Contains all attempts and a snippet of the input.
-class JsonAttemptRecord {
+class JsonAttemptRecord implements DebugRecord {
+  @override
   final DateTime timestamp;
   final String scope;
   final String inputSnippet; // first 200 chars of the raw AI response
@@ -90,6 +138,21 @@ class JsonAttemptRecord {
     required this.attempts,
     this.finalException,
   });
+
+  @override
+  String get recordType => 'json_attempt';
+
+  @override
+  Map<String, Object?> toJson() => {
+        'recordType': recordType,
+        'timestamp': timestamp.toIso8601String(),
+        'scope': scope,
+        'inputSnippet': inputSnippet,
+        'attempts': attempts
+            .map((a) => {'method': a.method, 'ok': a.ok, 'error': a.error})
+            .toList(),
+        'finalException': finalException,
+      };
 }
 
 /// Snapshot of in-memory app state. Refreshed by TaskNotifier / SettingsNotifier.
@@ -115,9 +178,16 @@ class _DebugNotifier extends ChangeNotifier {
 }
 
 class DebugService {
-  DebugService._();
+  /// Build a [DebugService] backed by the given [sinks]. Use this from
+  /// tests to inject custom sinks; production uses [instance] which is
+  /// pre-wired with a single [InMemoryRingSink].
+  factory DebugService.withSinks(List<DebugSink> sinks) {
+    return DebugService._fromSinks(sinks);
+  }
 
-  static final DebugService instance = DebugService._();
+  DebugService._fromSinks(this._sinks);
+
+  static final DebugService instance = DebugService.withSinks([InMemoryRingSink()]);
 
   static const int qwenCapacity = 200;
   static const int eventCapacity = 1000;
@@ -136,54 +206,61 @@ class DebugService {
   _DebugNotifier _changes = _DebugNotifier();
   Listenable get changes => _changes;
 
-  final List<QwenCallRecord> _qwenCalls = <QwenCallRecord>[];
-  final List<EventRecord> _events = <EventRecord>[];
-  final List<JsonAttemptRecord> _jsonAttempts = <JsonAttemptRecord>[];
+  List<DebugSink> _sinks = const [];
+  InMemoryRingSink? get _memorySink =>
+      _sinks.whereType<InMemoryRingSink>().firstOrNull;
   StateSnapshot? _stateSnapshot;
 
-  List<QwenCallRecord> get qwenCalls => List.unmodifiable(_qwenCalls);
-  List<EventRecord> get events => List.unmodifiable(_events);
-  List<JsonAttemptRecord> get jsonAttempts => List.unmodifiable(_jsonAttempts);
+  final DebugStats _stats = DebugStats();
+  DebugStats get stats => _stats;
+
+  List<QwenCallRecord> get qwenCalls => _memorySink?.qwenCalls ?? const [];
+  List<EventRecord> get events => _memorySink?.events ?? const [];
+  List<JsonAttemptRecord> get jsonAttempts => _memorySink?.jsonAttempts ?? const [];
   StateSnapshot? get stateSnapshot => _stateSnapshot;
 
   void setEnabled(bool value) {
     _enabled = value;
   }
 
-  void recordQwenCall(QwenCallRecord record) {
-    if (!_enabled) return;
-    _qwenCalls.add(record);
-    if (_qwenCalls.length > qwenCapacity) {
-      _qwenCalls.removeAt(0);
-    }
-    _changes.notify();
+  void addSink(DebugSink sink) {
+    _sinks = [..._sinks, sink];
   }
 
-  void recordEvent({
+  Future<void> recordQwenCall(QwenCallRecord record) async {
+    if (!_enabled) return;
+    await _dispatch(record);
+  }
+
+  Future<void> recordEvent({
     required String scope,
     required String message,
     EventLevel level = EventLevel.info,
     Map<String, Object?>? data,
-  }) {
+  }) async {
     if (!_enabled) return;
-    _events.add(EventRecord(
+    await _dispatch(EventRecord(
       timestamp: DateTime.now(),
       scope: scope,
       level: level,
       message: message,
       data: data,
     ));
-    if (_events.length > eventCapacity) {
-      _events.removeAt(0);
-    }
-    _changes.notify();
   }
 
-  void recordJsonAttempt(JsonAttemptRecord record) {
+  Future<void> recordJsonAttempt(JsonAttemptRecord record) async {
     if (!_enabled) return;
-    _jsonAttempts.add(record);
-    if (_jsonAttempts.length > jsonAttemptCapacity) {
-      _jsonAttempts.removeAt(0);
+    await _dispatch(record);
+  }
+
+  Future<void> _dispatch(DebugRecord record) async {
+    _stats.record(record);
+    for (final sink in _sinks) {
+      try {
+        await sink.write(record);
+      } catch (_) {
+        // Sinks must not throw, but be defensive.
+      }
     }
     _changes.notify();
   }
@@ -204,9 +281,7 @@ class DebugService {
   }
 
   void clear() {
-    _qwenCalls.clear();
-    _events.clear();
-    _jsonAttempts.clear();
+    _memorySink?.clear();
     _stateSnapshot = null;
   }
 
@@ -218,7 +293,11 @@ class DebugService {
     _enabled = false;
     _changes.dispose();
     _changes = _DebugNotifier();
+    _stats.reset();
     clear();
+    if (identical(this, instance)) {
+      _sinks = [InMemoryRingSink()];
+    }
   }
 }
 

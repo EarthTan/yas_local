@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/debug_service.dart';
+import '../services/debug/debug_service.dart';
 
 class DebugState {
   final List<QwenCallRecord> qwenCalls;
