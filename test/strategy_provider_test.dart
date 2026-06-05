@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -122,6 +123,33 @@ class _FakeUnconfiguredSettingsNotifier extends SettingsNotifier {
   _FakeUnconfiguredSettingsNotifier() {
     state = const AppSettings();
   }
+}
+
+/// Qwen stub whose `refineStrategy` waits on a static Completer until the
+/// test calls [release]. Used by the dispose-mid-flight test to park the
+/// notifier on a known await point.
+class _HangingQwenService extends QwenService {
+  _HangingQwenService() : super(const AppSettings(apiKey: 'k'));
+
+  static final _gate = Completer<ReferenceAnswer>();
+
+  static void release() {
+    if (!_gate.isCompleted) {
+      _gate.complete(ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: const [CheckpointDef(id: 'cp1', description: 'd', points: 2)],
+      ));
+    }
+  }
+
+  @override
+  Future<ReferenceAnswer> refineStrategy({
+    required RubricItem rubric,
+    required ReferenceAnswer current,
+    required List<StrategyMessage> chatHistory,
+    required String userMessage,
+  }) =>
+      _gate.future;
 }
 
 class _FakeConfiguredSettingsNotifier extends SettingsNotifier {
@@ -476,6 +504,63 @@ void main() {
       // After 500ms+, the save should have happened.
       await Future<void>.delayed(const Duration(milliseconds: 600));
       expect(await cacheFile2.exists(), isTrue);
+    });
+
+    test('sendMessage is no-op if notifier is disposed mid-flight', () async {
+      // Build a container similar to the one above, but this time we'll
+      // dispose it while sendMessage is awaiting the VLM. With the token
+      // guard (c4c) the in-flight call must not throw
+      // "StateNotifier used after dispose" — it should silently bail.
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+      final c = ProviderContainer(overrides: [
+        settingsProvider.overrideWith((ref) => _FakeConfiguredSettingsNotifier()),
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        // _StubQwen.refineStrategy returns immediately (no await chain),
+        // so we use a Completer-based stub that only completes when we
+        // tell it to — this lets us deterministically dispose *while* the
+        // notifier is mid-flight.
+        qwenFactoryProvider.overrideWithValue((ref) => _HangingQwenService()),
+      ]);
+      // Pin strategyProvider so autoDispose doesn't kick in while we
+      // arrange the mid-flight dispose.
+      final sub = c.listen(strategyProvider, (prev, next) {});
+      // Drain TaskNotifier._load() (started in the constructor) BEFORE we
+      // kick off sendMessage. Otherwise the load's post-await state write
+      // races with our dispose and throws a different StateError that
+      // masks the bug under test. 10 drains is generous for the file I/O
+      // chain inside TaskStore.load().
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      addTearDown(() {
+        _HangingQwenService.release();
+        sub.close();
+        c.dispose();
+      });
+      final n = c.read(strategyProvider.notifier);
+      // Seed a reference so sendMessage can find it.
+      final ref = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: [const CheckpointDef(id: 'cp1', description: 'd', points: 2)],
+      );
+      n.state = StrategyState(references: [ref]);
+      // Kick off sendMessage but dispose the container mid-flight so the
+      // token is bumped.
+      final fut = n.sendMessage('t1', 1, 'hi');
+      // Yield several times so sendMessage has captured its `myToken` and
+      // is now parked on the Completer inside _HangingQwenService.
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      c.dispose();
+      // Now release the hanging Qwen so the post-await state write runs.
+      _HangingQwenService.release();
+      // The sendMessage should complete without throwing "used after dispose".
+      await fut;
+      // No assertion needed beyond "no throw". If the bug were present, the
+      // call would throw StateError.
     });
 
     test('sendMessage schedules a debounced save (500ms)', () async {

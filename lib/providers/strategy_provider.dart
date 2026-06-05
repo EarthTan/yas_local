@@ -63,6 +63,18 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   /// burst of edits only writes once, 500ms after the last one.
   Timer? _saveDebounce;
 
+  /// Generation counter for in-flight async work. Bumped in [dispose] so any
+  /// `await`ed work that resolves after dispose can detect it's stale and
+  /// bail before writing to a dead notifier (see bbbbbiiiigBugs.md#S-9).
+  int _token = 0;
+
+  @override
+  void dispose() {
+    _token++;
+    _saveDebounce?.cancel();
+    super.dispose();
+  }
+
   void _scheduleSave(String taskId) {
     _saveDebounce?.cancel();
     _saveTaskId = taskId;
@@ -95,6 +107,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   /// Retry generation for a single question — replaces the cached
   /// reference for that questionNumber with a fresh one from the VLM.
   Future<void> retryGenerate(String taskId, int questionNumber) async {
+    final myToken = _token;
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) {
       state = state.copyWith(error: '未配置 API Key，请先到设置填写');
@@ -122,6 +135,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         answerImagePaths: task.answerImagePaths,
         totalQuestions: task.rubric.length,
       );
+      if (myToken != _token) return; // disposed mid-flight
       final newRefs = [
         for (final r in state.references)
           if (r.questionNumber == questionNumber) updated else r,
@@ -148,6 +162,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         message: 'retryGenerate 完成',
       );
     } catch (e) {
+      if (myToken != _token) return; // disposed mid-flight
       state = state.copyWith(
         refining: false,
         refiningQuestion: null,
@@ -168,6 +183,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     int questionNum,
     String message,
   ) async {
+    final myToken = _token;
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) return;
 
@@ -210,6 +226,8 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         userMessage: message,
       );
 
+      if (myToken != _token) return; // disposed mid-flight
+
       final aiReply = updated.checkpoints
           .map((c) => '• ${c.description}（${c.points}分）')
           .join('\n');
@@ -236,6 +254,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         message: 'refine 完成',
       );
     } catch (e) {
+      if (myToken != _token) return; // disposed mid-flight
       // On error, still record the user message in history
       final newRef = current.copyWith(
         chatHistory: [
@@ -257,6 +276,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         data: {'error': e.toString()},
       );
     }
+    if (myToken != _token) return; // disposed mid-flight
     _scheduleSave(taskId);
   }
 
