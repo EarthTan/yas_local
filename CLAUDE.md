@@ -133,8 +133,12 @@ DebugService (singleton)
 - **Service**: `lib/services/debug/debug_service.dart` —— `DebugService.instance` 是单例，public API 是 `recordQwenCall` / `recordEvent` / `recordJsonAttempt` / `setEnabled` / `clear` / `resetForTest`。内部用 `_dispatch` 路由到所有 sink。
 - **Sink 接口**: `lib/services/debug/debug_sink.dart` —— `DebugSink.write(record)` **绝不能抛异常**。
 - **InMemoryRingSink**: 进程内 ring buffer，容量（qwen 200 / event 1000 / json 200）通过构造参数注入。
-- **RollingFileSink**: 落盘到 `getApplicationSupportDirectory()/log/yas_YYYY-MM-DD.log`，5MB 轮转、NDJSON 格式。
+- **RollingFileSink**: 落盘到 `getApplicationSupportDirectory()/log/yas_YYYY-MM-DD.log`，5MB 轮转、NDJSON 格式。Public `close()` / `flush()` 都通过 `_writeLock` 串行；**`write()` 的 catch 绝不能重新获取 lock** —— C1 死锁曾经就在这里（`close()` 在锁内被调用 → 二次获取 → 死锁）。修复方式：catch 里只 `_sink = null`，让下次 `write()` 重新开 sink。详见 commit history。
 - **DebugStats**: 写入路径上 O(1) 更新 `Map<DebugScope, _ScopeStats>` 计数器；snapshot 给 Stats tab 用。
+
+### Qwen 调用记录
+
+`QwenCallRecord.status` 三种值：Dio 拦截器在每次 HTTP 调用时记录 `ok`（2xx）或 `httpError`（4xx/5xx）。**`parseError` 由 `_retryingRequest` 在 `lib/services/qwen_service.dart` 的 catch 里 fire-and-forget 记录**——仅当 `QwenErrorKind.jsonParse` 或 200 响应 + `as String` cast 抛 `TypeError`（空 body / 缺 `content` 字段）时触发，且只在最后一次重试失败时记一条。原始响应放在 `responseContent`，原始异常放在 `errorMessage`（用于在 Debug 屏区分"空 body"和"坏 JSON"，不需要新加 `QwenErrorKind`）。这样 `/debug` 的 **JSON 解析** tab 在 3 次重试全失败时能看到一条 `parseError` 汇总 + 3 条 `ok`（带原始 responseContent），而不是只能看到 3 条 `ok` 然后手动比对。
 
 ### 错误捕获三件套（main.dart）
 
@@ -238,13 +242,13 @@ Notable files (full directory is in `yas_local/test/`):
 - `atomic_io_test.dart` — `writeJsonAtomic` happy / overwrite / cleanup-on-failure; `readJsonOrQuarantine` happy / missing / corrupt-quarantine / corrupt-rename-fails / rapid-back-to-back-counter.
 - `run_pool_test.dart` — `runPool` concurrency semantics (no leaking, error isolation).
 - `job_queue_test.dart` — `JobQueueNotifier` lifecycle: idempotent start, cancel, terminal-phase-on-outer-error, per-task state isolation.
-- `qwen_service_test.dart` — Dio interceptor / `QwenCallRecord` capture.
+- `qwen_service_test.dart` — Dio interceptor / `QwenCallRecord` capture. **C2: 3 次重试全失败时记录 1 条 `parseError` + 3 条 `ok`（multiset count, 因为 fire-and-forget 的 `recordQwenCall` 顺序不确定）；`1 bad + 1 good` 不应记录 parseError；空 body 触发 TypeError 也归类为 parseError。**
 - `results_partial_test.dart` — locks in partial-grading rendering on the results screen.
 - `task_card_status_test.dart` — `resolveTaskCardStatus` derivation from `JobState`.
 - `strategy_provider_test.dart`, `strategy_navigation_test.dart` — `StrategyNotifier` review side, navigation.
 - `debug_service_test.dart`, `debug_provider_test.dart` — `DebugService` ring buffers + opt-in flag + reset semantics.
 - `image_compressor_test.dart` — VLM-input image compression.
-- `debug_sink_test.dart` — InMemoryRingSink 裁剪 + RollingFileSink rotation
+- `debug_sink_test.dart` — InMemoryRingSink 裁剪 + RollingFileSink rotation + **C1: write 在 mid-stream 失败后仍能继续接受新 write（re-entrant lock 死锁的回归测试）**。
 - `debug_stats_test.dart` — O(1) 计数、p50/p95、最近 100 裁剪
 - `debug_export_test.dart` — 写文件 + 平台 reveal 不抛
 - `main_error_hooks_test.dart` — 四件套钩子安装

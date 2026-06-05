@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -460,21 +461,83 @@ class QwenService {
           data: bodyBuilder(attempt, lastKind),
           options: Options(extra: {'_qwen_scope': scope}),
         );
-        final content =
-            resp.data['choices'][0]['message']['content'] as String;
+        // Split the cast into two statements so `content` is in scope
+        // in the catch — the single-statement form does NOT bind
+        // `content` if the RHS cast throws on a null/missing body.
+        final rawContent = resp.data['choices'][0]['message']['content'];
+        final content = rawContent as String;
         return extract(content);
       } catch (e) {
         final q = QwenError.from(e);
         // 4xx is a hard "stop" — no point retrying 401 / 403 / 404.
         if (!q.shouldRetry) throw q;
         lastKind = q.kind;
-        if (attempt == maxAttempts - 1) throw q;
+        if (attempt == maxAttempts - 1) {
+          // Last attempt failed. Record a parseError summary so the
+          // Debug screen's JSON 解析 tab is useful (without this, all
+          // 3 attempts show up as "ok" because the Dio interceptor
+          // records per HTTP outcome, not per parse outcome). The
+          // record is fire-and-forget: matching the interceptor's
+          // pattern, so a record-side failure cannot replace the
+          // original QwenError in the throw chain.
+          if (q.kind == QwenErrorKind.jsonParse ||
+              // Empty/missing body surfaces as a TypeError on the
+              // `as String` cast; functionally a parse failure. The
+              // errorMessage field on the record preserves the
+              // original TypeError so a teacher can distinguish it
+              // from a JSON decode failure in the Debug screen.
+              (q.kind == QwenErrorKind.unknown && e is TypeError)) {
+            // Fire-and-forget — see the interceptor's recordQwenCall
+            // pattern. A record-side failure must not replace the
+            // original QwenError in the throw chain.
+            _recordParseError(
+              scope: scope,
+              bodyBuilder: bodyBuilder,
+              attempt: attempt,
+              lastKind: lastKind,
+              content: e is JsonParseException ? e.rawContent : null,
+              error: e,
+            ).ignore();
+          }
+          throw q;
+        }
         final delay = _backoffMs(attempt);
         await Future<void>.delayed(Duration(milliseconds: delay));
       }
     }
     // Unreachable: the loop either returns or rethrows. Belt-and-braces.
     throw StateError('unreachable: _retryingRequest exhausted');
+  }
+
+  Future<void> _recordParseError({
+    required String scope,
+    required Map<String, dynamic> Function(int attempt, QwenErrorKind? lastKind)
+        bodyBuilder,
+    required int attempt,
+    required QwenErrorKind? lastKind,
+    required String? content,
+    required Object error,
+  }) {
+    final body = bodyBuilder(attempt, lastKind);
+    List<Map<String, dynamic>> messages;
+    final raw = body['messages'];
+    if (raw is List) {
+      messages = raw.whereType<Map<String, dynamic>>().toList();
+    } else {
+      messages = const [];
+    }
+    return DebugService.instance.recordQwenCall(QwenCallRecord(
+      timestamp: DateTime.now(),
+      scope: scope,
+      model: settings.vlModel,
+      endpoint: '/chat/completions',
+      statusCode: 200,
+      elapsedMs: 0,
+      status: QwenCallStatus.parseError,
+      messages: redactBase64Messages(messages),
+      responseContent: content ?? '',
+      errorMessage: error.toString(),
+    ));
   }
 
   int _backoffMs(int attempt) {

@@ -23,8 +23,9 @@ class RollingFileSink implements DebugSink {
   IOSink? _sink;
   String? _currentFilePath;
   // TODO: migrate to `lib/services/async_lock.dart` `AsyncLock` in a
-  // follow-up — this private duplicate is the original `_Lock` pattern
-  // lifted into the public `AsyncLock` class.
+  // follow-up. Verify that no body path can recursively acquire — the
+  // `write` catch used to call `close()` (which re-acquired the lock
+  // here); the C1 fix removed that close() call.
   final _writeLock = _Lock();
 
   String _formatDate(DateTime dt) {
@@ -72,9 +73,13 @@ class RollingFileSink implements DebugSink {
         _sink = file.openWrite(mode: FileMode.append);
         _sink!.add(bytes);
       } catch (_) {
-        try {
-          await _sink?.close();
-        } catch (_) {}
+        // The write that triggered this catch is broken (disk full,
+        // sandboxed I/O denial, EISDIR, etc.). The bytes are already
+        // lost. The sink handle is stale — drop it and let the next
+        // write() reopen a fresh IOSink. DO NOT call close() here:
+        // close() re-acquires _writeLock, and we're already holding it
+        // (C1 deadlock). The IOSink's underlying FileHandle will be
+        // released when this Dart object is GC'd.
         _sink = null;
       }
     });

@@ -150,6 +150,60 @@ void main() {
       );
     });
 
+    test('write survives a mid-stream failure and keeps accepting writes (C1)',
+        () async {
+      // Contract being tested: a single failed write() must NOT leave
+      // the sink wedged. Before the C1 fix, the catch in write() called
+      // close() (which re-acquired the write lock) — deadlock. After
+      // the fix, the catch just nulls _sink and returns; the next
+      // write() must succeed.
+      //
+      // We force a failure by pre-creating the expected log file path
+      // as a *directory* — file.openWrite(mode: append) throws EISDIR.
+      //
+      // DO NOT time-bound this test. If the deadlock is real, the
+      // test runner will hang; the fix returns in microseconds.
+      PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
+      final logDir = Directory('${tempDir.path}/log');
+      await logDir.create(recursive: true);
+      // Use a future-dated timestamp so the path doesn't collide with
+      // any other test's path.
+      final recordTs = DateTime.now().add(const Duration(days: 365));
+      final expectedPath = '${logDir.path}/test_${_formatTs(recordTs)}.log';
+      // Block the path.
+      Directory(expectedPath).createSync(recursive: true);
+
+      final sink = RollingFileSink(directory: logDir.path, baseName: 'test');
+
+      // First write: hits the EISDIR. Must NOT deadlock.
+      await sink.write(EventRecord(
+        timestamp: recordTs,
+        scope: 's',
+        level: EventLevel.info,
+        message: 'first',
+      ));
+
+      // Unblock and write again, with a different timestamp so the
+      // sink rotates to a fresh path. Asserting the second write
+      // *lands on disk* is the strongest contract we can test.
+      Directory(expectedPath).deleteSync(recursive: true);
+      final afterTs = DateTime.now().add(const Duration(days: 366));
+      await sink.write(EventRecord(
+        timestamp: afterTs,
+        scope: 's',
+        level: EventLevel.info,
+        message: 'second',
+      ));
+      await sink.flush();
+
+      final afterPath = '${logDir.path}/test_${_formatTs(afterTs)}.log';
+      expect(File(afterPath).existsSync(), isTrue,
+          reason: 'second write should create the log file at $afterPath');
+      final content = await File(afterPath).readAsString();
+      expect(content, contains('"message":"second"'),
+          reason: 'second write should have actually landed on disk');
+    });
+
     test('flush is no-op when nothing was written', () async {
       PathProviderPlatform.instance = _MemoryPathProvider(tempDir);
       final sink = RollingFileSink(directory: '${tempDir.path}/log', baseName: 'test');
@@ -161,6 +215,12 @@ void main() {
       expect(files, isEmpty);
     });
   });
+}
+
+String _formatTs(DateTime dt) {
+  return '${dt.year.toString().padLeft(4, '0')}'
+      '-${dt.month.toString().padLeft(2, '0')}'
+      '-${dt.day.toString().padLeft(2, '0')}';
 }
 
 class _MemoryPathProvider extends PathProviderPlatform with MockPlatformInterfaceMixin {
