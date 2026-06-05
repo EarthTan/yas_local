@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:yas_local/services/debug_service.dart';
-import 'package:yas_local/screens/debug_screen.dart';
+import 'package:yas_local/services/debug/debug_service.dart';
+import 'package:yas_local/screens/debug/debug_screen.dart';
 
 void main() {
   setUp(() {
@@ -10,16 +10,19 @@ void main() {
     DebugService.instance.setEnabled(true);
   });
 
-  testWidgets('renders DebugScreen with 4 tabs', (tester) async {
+  testWidgets('renders DebugScreen with 5 tabs', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(home: DebugScreen()),
       ),
     );
-    expect(find.text('Qwen'), findsOneWidget);
-    expect(find.text('事件'), findsOneWidget);
-    expect(find.text('状态'), findsOneWidget);
-    expect(find.text('JSON'), findsOneWidget);
+    // Each tab label appears in the TabBar (and is mirrored in the body
+    // header added in M5), so we only require at least one match.
+    expect(find.text('Qwen 调用'), findsAtLeastNWidgets(1));
+    expect(find.text('事件'), findsAtLeastNWidgets(1));
+    expect(find.text('状态'), findsAtLeastNWidgets(1));
+    expect(find.text('JSON 解析'), findsAtLeastNWidgets(1));
+    expect(find.text('统计'), findsAtLeastNWidgets(1));
   });
 
   testWidgets('Qwen tab shows empty state when no calls', (tester) async {
@@ -60,13 +63,13 @@ void main() {
         child: MaterialApp(home: DebugScreen()),
       ),
     );
-    await tester.tap(find.text('JSON'));
+    await tester.tap(find.text('JSON 解析'));
     await tester.pumpAndSettle();
     expect(find.text('暂无 JSON 解析记录'), findsOneWidget);
   });
 
   testWidgets('Qwen tab renders a recorded call', (tester) async {
-    DebugService.instance.recordQwenCall(QwenCallRecord(
+    await DebugService.instance.recordQwenCall(QwenCallRecord(
       timestamp: DateTime.now(),
       scope: 'identify',
       model: 'qwen-vl-max',
@@ -95,7 +98,9 @@ void main() {
     expect(find.text('暂无 Qwen 调用记录'), findsOneWidget);
 
     // Record a call after the screen is mounted — no manual refresh allowed.
-    DebugService.instance.recordQwenCall(QwenCallRecord(
+    // Awaiting ensures the dispatch (and the listener notification that
+    // triggers rebuild) has completed before pump() runs.
+    await DebugService.instance.recordQwenCall(QwenCallRecord(
       timestamp: DateTime.now(),
       scope: 'grade',
       model: 'qwen-vl-max',
