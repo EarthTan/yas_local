@@ -1,17 +1,22 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../models/reference_answer.dart';
+import 'async_lock.dart';
+import 'atomic_io.dart';
 
 class ReferenceStore {
   static String encode(List<ReferenceAnswer> refs) =>
       jsonEncode(refs.map((r) => r.toJson()).toList());
 
-  static List<ReferenceAnswer> decode(String raw) {
-    if (raw.trim().isEmpty) return [];
-    final list = jsonDecode(raw) as List;
-    return list.map((e) => ReferenceAnswer.fromJson(e as Map<String, dynamic>)).toList();
+  /// Public for testing; called by `readJsonOrQuarantine` with the parsed
+  /// JSON value (a `List<dynamic>` for the reference cache shape).
+  static List<ReferenceAnswer> decode(Object? parsed) {
+    if (parsed is! List) return const [];
+    return parsed
+        .whereType<Map<String, dynamic>>()
+        .map(ReferenceAnswer.fromJson)
+        .toList();
   }
 
   static Future<File> _file(String taskId) async {
@@ -19,34 +24,38 @@ class ReferenceStore {
     return File('${dir.path}/reference_$taskId.json');
   }
 
-  static Future<List<ReferenceAnswer>> load(String taskId) async {
-    // Reads are cheap and we don't have a strong ordering requirement for
-    // concurrent load+save, but a chain of saves still serializes all of
-    // itself via the save chain — see [_saveChain].
-    final f = await _file(taskId);
-    if (!await f.exists()) return [];
-    return decode(await f.readAsString());
+  // Serializes all writes to per-task reference files. A single static
+  // lock is correct because the lock is only held during disk I/O (a few
+  // ms); serializing across taskIds is harmless and avoids the per-task
+  // lifecycle management of N locks.
+  static final AsyncLock _lock = AsyncLock();
+
+  /// Atomically write [refs] to the cache file for [taskId]. Concurrent
+  /// callers wait on an internal mutex; a failed write does not skip the
+  /// next caller.
+  static Future<void> save(String taskId, List<ReferenceAnswer> refs) {
+    return _lock.synchronized(() async {
+      final f = await _file(taskId);
+      await writeJsonAtomic(f, encode(refs));
+    });
   }
 
-  // Same shape as TaskStore._persistChain (13c9a45): coalesces parallel
-  // writers (e.g. "重跑失败题" job and StrategyNotifier.saveAllConfirmed) so
-  // they don't clobber the same reference_<taskId>.json.
-  static Future<void> _saveChain = Future.value();
+  /// Read the cached references for [taskId]. On parse failure the file
+  /// is quarantined (renamed to `<name>.broken.reference.<pid>.<micros>.<counter>`
+  /// and a DebugService event is emitted) and `[]` is returned.
+  static Future<List<ReferenceAnswer>> load(String taskId) async {
+    final f = await _file(taskId);
+    return readJsonOrQuarantine<List<ReferenceAnswer>>(
+      f,
+      decode,
+      () => <ReferenceAnswer>[],
+      scope: 'reference',
+    );
+  }
 
-  static Future<void> save(String taskId, List<ReferenceAnswer> refs) {
-    final next = _saveChain
-        .then((_) async {
-          final f = await _file(taskId);
-          await f.writeAsString(encode(refs));
-        })
-        .catchError((Object e, StackTrace s) {
-      _saveChain = Future.value();
-      // ignore: avoid_print
-      print('ReferenceStore.save failed; chain reset: $e');
-      // ignore: avoid_redundant_argument_values
-      Error.throwWithStackTrace(e, s);
-    });
-    _saveChain = next;
-    return next;
+  /// Test-only: drop any pending writes and clear the lock. Use in setUp
+  /// to ensure a clean slate between tests.
+  static void resetForTest() {
+    _lock.resetForTest();
   }
 }

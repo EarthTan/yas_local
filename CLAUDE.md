@@ -73,7 +73,7 @@ Long-running VLM loops (Phase 1 strategy generation, Phase 2 grading) run as in-
 - **State**: `lib/models/job_state.dart` — `JobState { taskId, kind (strategy|grading), phase (running|done|failed), total, done, failedCount, error, cancelRequested }`. There is no `cancelled` phase; a cancelled job ends as `done` with fewer units processed.
 - **Notifier**: `lib/providers/job_queue_provider.dart` — `jobQueueProvider` holds a `Map<String, JobState>`. Per-task entry points: `startGrading(taskId)`, `startStrategy(taskId)`, `cancel(taskId)`, `clear(taskId)`. Each is idempotent and refuses to re-run while a job is already in `running` phase for that task.
 - **Concurrency**: `lib/services/run_pool.dart` — `runPool(items, maxConcurrency, task)` (max = `kMaxConcurrency = 3`, kept small to be friendly to free-tier rate limits). Dart is single-isolate so the worker's `next++` cursor needs no lock. Errors do NOT auto-propagate: the JobQueue wraps each per-unit task in try/catch so one failed submission/question never aborts the batch. The first error wins the job's `error` field.
-- **Persistence isolation**: jobs themselves are session-scoped (not written to disk). Durable progress lives on each `Submission`'s status; durable strategy output lives in `reference_<taskId>.json`. `TaskStore` writes are serialized via a mutex (added in 13c9a45) so parallel jobs persisting to `tasks.json` don't clobber each other.
+- **Persistence isolation**: jobs themselves are session-scoped (not written to disk). Durable progress lives on each `Submission`'s status; durable strategy output lives in `reference_<taskId>.json`. `ReferenceStore.save` is mutex-serialized internally (an `AsyncLock` shared across all taskIds). `TaskStore.save` is NOT mutex-serialized at the store level — the serialization is in `TaskNotifier._persistChain` (provider layer, added in 13c9a45) so parallel jobs persisting to `tasks.json` don't clobber each other. Callers must NOT bypass the provider.
 - **UI integration**: home cards and the task-detail screen read `jobQueueProvider` to derive a per-task status (`resolveTaskCardStatus`). The strategy review screen kicks off `startStrategy` and runs the VLM in the background — no spinner screen.
 
 When changing the JobQueue: always derive the next `JobState` via `_patch(taskId, update)` rather than holding a stale copy, so a `cancelRequested` set by another caller is not clobbered. Outer `try/catch` around the per-unit loop is mandatory — if e.g. `ReferenceStore.load` throws, the job must still reach a terminal phase or `_isRunning` will stay true and the task can never be re-graded.
@@ -103,10 +103,18 @@ It strips `<think>…</think>` and `<thinking>…</thinking>` blocks (case-insen
 ## Data persistence
 
 - All data stored as JSON files in the app's documents / app-support directory.
-- `tasks.json`: array of `GradingTask` + array of `Submission`, loaded eagerly at app start. Writes are serialized (see "Async background jobs" — parallel jobs sharing the same store must go through a mutex).
-- `reference_<taskId>.json`: cached Phase 1 output per task; re-running Phase 1 skips questions already present.
+- `tasks.json`: array of `GradingTask` + array of `Submission`, loaded eagerly at app start. **Writes are NOT mutex-serialized at the store level** — serialization is at the provider layer via `TaskNotifier._persistChain` in `task_provider.dart:42-58`. All callers MUST go through `TaskNotifier._persist`; calling `TaskStore.save` directly from anywhere else can clobber a parallel writer. The store itself only ensures atomicity (see below).
+- `reference_<taskId>.json`: cached Phase 1 output per task; re-running Phase 1 skips questions already present. **Writes ARE mutex-serialized at the store level** via an internal `AsyncLock` (a per-store FIFO mutex; one lock covers all taskIds because the lock is only held during disk I/O).
 - `settings.json`: single `AppSettings` object.
 - Images copied to app documents directory for persistence across sessions.
+
+### Atomic writes + quarantine on corrupt files
+
+All three stores write through `lib/services/atomic_io.dart`:
+- `writeJsonAtomic(file, content)` writes to a tmp file in the same directory, fsyncs (`flush: true`), then `rename(2)`s over the target. The rename is atomic on POSIX (macOS / Linux / iOS sandbox); a crash mid-write cannot leave a half-written JSON file.
+- `readJsonOrQuarantine(file, decode, empty, scope: '…')` reads + JSON-decodes; on any failure (read, JSON parse, or the store's `decode` callback throwing) the file is renamed aside to `<original>.<scope>.broken.<pid>.<micros>.<counter>` (sibling, same directory) and a `DebugService.recordEvent(scope: scope, level: error, …)` is emitted. Stores then return their empty value (`StoreData([], [])`, `[]`, or `const AppSettings()`). This means a corrupt `tasks.json` / `reference_*.json` / `settings.json` can never crash the app at startup — the user lands in an empty Tasks home with a DebugService event visible in `/debug` instead of a black screen.
+
+`SettingsStore.save` continues to swallow I/O errors (the settings UI always shows "已保存" on the call path) but now also emits a `recordEvent(scope: 'settings', level: error, message: 'persist: settings save failed', …)` so the failure is observable in `/debug`.
 
 ## Debug 与可观测性
 
@@ -125,8 +133,12 @@ DebugService (singleton)
 - **Service**: `lib/services/debug/debug_service.dart` —— `DebugService.instance` 是单例，public API 是 `recordQwenCall` / `recordEvent` / `recordJsonAttempt` / `setEnabled` / `clear` / `resetForTest`。内部用 `_dispatch` 路由到所有 sink。
 - **Sink 接口**: `lib/services/debug/debug_sink.dart` —— `DebugSink.write(record)` **绝不能抛异常**。
 - **InMemoryRingSink**: 进程内 ring buffer，容量（qwen 200 / event 1000 / json 200）通过构造参数注入。
-- **RollingFileSink**: 落盘到 `getApplicationSupportDirectory()/log/yas_YYYY-MM-DD.log`，5MB 轮转、NDJSON 格式。
+- **RollingFileSink**: 落盘到 `getApplicationSupportDirectory()/log/yas_YYYY-MM-DD.log`，5MB 轮转、NDJSON 格式。Public `close()` / `flush()` 都通过 `_writeLock` 串行；**`write()` 的 catch 绝不能重新获取 lock** —— C1 死锁曾经就在这里（`close()` 在锁内被调用 → 二次获取 → 死锁）。修复方式：catch 里只 `_sink = null`，让下次 `write()` 重新开 sink。详见 commit history。
 - **DebugStats**: 写入路径上 O(1) 更新 `Map<DebugScope, _ScopeStats>` 计数器；snapshot 给 Stats tab 用。
+
+### Qwen 调用记录
+
+`QwenCallRecord.status` 三种值：Dio 拦截器在每次 HTTP 调用时记录 `ok`（2xx）或 `httpError`（4xx/5xx）。**`parseError` 由 `_retryingRequest` 在 `lib/services/qwen_service.dart` 的 catch 里 fire-and-forget 记录**——仅当 `QwenErrorKind.jsonParse` 或 200 响应 + `as String` cast 抛 `TypeError`（空 body / 缺 `content` 字段）时触发，且只在最后一次重试失败时记一条。原始响应放在 `responseContent`，原始异常放在 `errorMessage`（用于在 Debug 屏区分"空 body"和"坏 JSON"，不需要新加 `QwenErrorKind`）。这样 `/debug` 的 **JSON 解析** tab 在 3 次重试全失败时能看到一条 `parseError` 汇总 + 3 条 `ok`（带原始 responseContent），而不是只能看到 3 条 `ok` 然后手动比对。
 
 ### 错误捕获三件套（main.dart）
 
@@ -165,7 +177,7 @@ DebugService (singleton)
 - **Reference caching**: `reference_<taskId>.json` written by `JobQueueNotifier.startStrategy` (initial batch) and `StrategyNotifier.saveAllConfirmed` (after edits). Read by `JobQueueNotifier.startGrading` for Phase 2.
 - **Interactive strategy refinement**: `ReferenceAnswer.confirmed` + `chatHistory` enable a teacher-in-the-loop workflow where strategy can be iterated per-question before final grading. Refinement (`refineStrategy`) is a *sync* call from the review screen, distinct from the *async* generation done by `JobQueueNotifier.startStrategy`.
 - **Background jobs over full-screen flows**: long-running VLM loops run as `JobQueueNotifier` jobs keyed by `taskId`, not as dedicated screens. UI shows live progress and errors on the task card / task detail. Always reach a terminal phase — even an outer `try/catch` failure must set `phase` to `failed`, otherwise `_isRunning` stays true and the task can never be re-graded.
-- **Concurrency**: `runPool(items, kMaxConcurrency, task)` runs units in parallel (max 3, friendly to free-tier rate limits). Per-unit errors are caught and reflected on `JobState.failedCount` / `error`; the first error wins. `TaskStore` writes are serialized to make parallel persistence safe.
+- **Concurrency**: `runPool(items, kMaxConcurrency, task)` runs units in parallel (max 3, friendly to free-tier rate limits). Per-unit errors are caught and reflected on `JobState.failedCount` / `error`; the first error wins. `ReferenceStore` writes are serialized internally via `AsyncLock` (see "Data persistence"). `TaskStore` writes are serialized at the provider via `TaskNotifier._persistChain`.
 - **Error handling**: `lib/services/error_formatter.dart` formats Dio errors in Chinese with URL, status code, and response snippet. First error in a batch is surfaced on the job's `error` field; the batch continues.
 - **Base URL normalization**: `QwenService._normalizeBaseUrl()` strips common endpoint suffixes so users can paste full URLs in settings.
 - **Teacher overrides**: `GradedItem.finalScore` prefers `teacherScore` over `aiScore`; `teacherScore` set via slider in `paper_detail_screen.dart`.
@@ -185,6 +197,8 @@ This list is intentionally non-exhaustive — only the files that materially sha
 - `qwen_service.dart` — Dio HTTP, all VLM calls (see table above).
 - `prompts.dart` — `AppPrompts` static methods, all LLM prompt templates live here. Edit here to tune prompts.
 - `json_extractor.dart` — `JsonExtractor` + `JsonParseException` + `ExtractionResult`/`ExtractionListResult`. The only place that parses response bodies.
+- `async_lock.dart` — `AsyncLock`, a FIFO async mutex (a `Completer`-chained FIFO). `ReferenceStore` uses an instance to serialize all writes; `RollingFileSink` has a private duplicate pending a follow-up migration.
+- `atomic_io.dart` — `writeJsonAtomic(file, content)` (tmp-write + fsync + atomic rename) and `readJsonOrQuarantine(file, decode, empty, scope: '…')` (read + JSON-decode + on-failure quarantine via rename + DebugService event). All three JSON stores route through these helpers — never call `writeAsString` on a `tasks.json` / `reference_*.json` / `settings.json` path directly.
 - `debug/debug_service.dart` — `DebugService` singleton + record types (QwenCallRecord, EventRecord, JsonAttemptRecord). Routes records through a `List<DebugSink>`. See "Debug sink architecture" above.
 - `debug/debug_sink.dart` — `DebugSink` interface (`write` / `flush` / `close`).
 - `debug/in_memory_ring_sink.dart` — `InMemoryRingSink`, the default in-memory sink on `DebugService.instance`.
@@ -194,7 +208,7 @@ This list is intentionally non-exhaustive — only the files that materially sha
 - `debug/tab_constants.dart` — 5 tab name constants.
 - `run_pool.dart` — `runPool(items, maxConcurrency, task)` concurrency helper (see "Async background jobs").
 - `error_formatter.dart` — Chinese-language Dio error formatter.
-- `task_store.dart`, `reference_store.dart`, `settings_store.dart` — JSON file I/O.
+- `task_store.dart`, `reference_store.dart`, `settings_store.dart` — JSON file I/O (all on top of `atomic_io.dart`; see "Data persistence" above for the atomic-write + quarantine contract).
 - `image_store.dart` — copies temp photos to app documents directory.
 
 **Providers** (`lib/providers/`):
@@ -222,17 +236,19 @@ Notable files (full directory is in `yas_local/test/`):
 - `prompts_test.dart` — `AppPrompts` template content (no API calls).
 - `grading_test.dart` — `CheckpointResult` aggregation, `ReferenceAnswer` construction.
 - `settings_test.dart`, `settings_provider_snapshot_test.dart` — `AppSettings` defaults, `isConfigured`, JSON round-trip, provider snapshot.
-- `task_store_test.dart` — `TaskStore` + `ReferenceStore` encode/decode round-trips.
-- `persist_lock_test.dart` — `TaskStore` write serialization under concurrent jobs.
+- `task_store_test.dart` — `TaskStore` + `ReferenceStore` encode/decode round-trips; **TaskStore I/O** (save+load, atomic write no-tmp-leak, corrupt-file quarantine, force-corrupt recovery).
+- `persist_lock_test.dart` — `TaskStore` write serialization under concurrent jobs; **ReferenceStore H1 race** (write A succeeds, write B fails, write C still lands); **ReferenceStore load** (missing returns `[]`, corrupt quarantines and returns `[]`).
+- `async_lock_test.dart` — `AsyncLock` ordering, error isolation, 100-caller serialization, `resetForTest`.
+- `atomic_io_test.dart` — `writeJsonAtomic` happy / overwrite / cleanup-on-failure; `readJsonOrQuarantine` happy / missing / corrupt-quarantine / corrupt-rename-fails / rapid-back-to-back-counter.
 - `run_pool_test.dart` — `runPool` concurrency semantics (no leaking, error isolation).
 - `job_queue_test.dart` — `JobQueueNotifier` lifecycle: idempotent start, cancel, terminal-phase-on-outer-error, per-task state isolation.
-- `qwen_service_test.dart` — Dio interceptor / `QwenCallRecord` capture.
+- `qwen_service_test.dart` — Dio interceptor / `QwenCallRecord` capture. **C2: 3 次重试全失败时记录 1 条 `parseError` + 3 条 `ok`（multiset count, 因为 fire-and-forget 的 `recordQwenCall` 顺序不确定）；`1 bad + 1 good` 不应记录 parseError；空 body 触发 TypeError 也归类为 parseError。**
 - `results_partial_test.dart` — locks in partial-grading rendering on the results screen.
 - `task_card_status_test.dart` — `resolveTaskCardStatus` derivation from `JobState`.
 - `strategy_provider_test.dart`, `strategy_navigation_test.dart` — `StrategyNotifier` review side, navigation.
 - `debug_service_test.dart`, `debug_provider_test.dart` — `DebugService` ring buffers + opt-in flag + reset semantics.
 - `image_compressor_test.dart` — VLM-input image compression.
-- `debug_sink_test.dart` — InMemoryRingSink 裁剪 + RollingFileSink rotation
+- `debug_sink_test.dart` — InMemoryRingSink 裁剪 + RollingFileSink rotation + **C1: write 在 mid-stream 失败后仍能继续接受新 write（re-entrant lock 死锁的回归测试）**。
 - `debug_stats_test.dart` — O(1) 计数、p50/p95、最近 100 裁剪
 - `debug_export_test.dart` — 写文件 + 平台 reveal 不抛
 - `main_error_hooks_test.dart` — 四件套钩子安装
