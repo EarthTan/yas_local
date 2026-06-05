@@ -54,10 +54,10 @@ void installErrorHooks() {
         'stack': details.stack?.toString(),
       },
     );
-    if (kDebugMode) {
-      return ErrorWidget(details.exception);
-    }
-    return const SizedBox.shrink();
+    // Always render Flutter's default ErrorWidget so a broken widget is
+    // visibly broken (gray box + error text) rather than invisibly blank.
+    // The recordEvent above still captures the error to the debug log.
+    return ErrorWidget(details.exception);
   };
 }
 

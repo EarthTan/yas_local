@@ -29,7 +29,9 @@ void main() {
     expect(events.first.level, EventLevel.error);
     expect(events.first.message, contains('boom'));
     expect(events.first.data?['widgetError'], isTrue);
-    expect(result, isA<Widget>());
+    // Render Flutter's default ErrorWidget so a broken widget stays visibly
+    // broken in release builds (no more SizedBox.shrink blank-box fallback).
+    expect(result, isA<ErrorWidget>());
   });
 
   test('ErrorWidget.builder records stack trace as a non-null string', () async {
