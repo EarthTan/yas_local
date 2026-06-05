@@ -73,7 +73,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
     return null;
   }
 
-  Future<void> setSubmissions(String taskId, List<Submission> subs) async {
+  Future<void> replaceSubmissions(String taskId, List<Submission> subs) async {
     final others = state.submissions.where((s) => s.taskId != taskId).toList();
     state = state.copyWith(submissions: [...others, ...subs]);
     await _persist();
