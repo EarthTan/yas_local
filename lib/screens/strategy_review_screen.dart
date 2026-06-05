@@ -95,14 +95,17 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     );
   }
 
-  void _nextUnconfirmed() {
+  /// Returns true if navigation happened; false if there are no more
+  /// unconfirmed questions (i.e. the teacher just confirmed the last one).
+  bool _nextUnconfirmed() {
     final refs = ref.read(strategyProvider).references;
     for (var i = 0; i < refs.length; i++) {
       if (!refs[i].confirmed) {
         _goTo(i);
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   @override
@@ -319,7 +322,16 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                     } else {
                       notifier.confirmQuestion(currentRef.questionNumber);
                       HapticFeedback.lightImpact();
-                      _nextUnconfirmed();
+                      final moved = _nextUnconfirmed();
+                      if (!moved) {
+                        HapticFeedback.heavyImpact();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('全部题已确认，可开始批改'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
                     }
                   },
                   onNext: () {
