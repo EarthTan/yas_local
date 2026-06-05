@@ -41,7 +41,11 @@ class _PaperDetailScreenState extends ConsumerState<PaperDetailScreen> {
           Image.file(File(sub.imagePath!), height: 220, fit: BoxFit.contain),
         for (final item in sub.items)
           Builder(builder: (context) {
-            final maxPts = rubricByNum[item.questionNumber]?.maxPoints ?? 20;
+            final maxPts = rubricByNum[item.questionNumber]?.maxPoints ??
+                (item.checkpoints.isNotEmpty
+                    ? item.checkpoints
+                        .fold<int>(0, (sum, c) => sum + c.pointsAwarded)
+                    : 20);
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Padding(
