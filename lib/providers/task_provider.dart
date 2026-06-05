@@ -126,6 +126,14 @@ class TaskNotifier extends StateNotifier<TaskState> {
     _refreshDebugSnapshot();
   }
 
+  /// Cancel any pending _persist and run it now. Used by the lifecycle
+  /// observer on app pause.
+  Future<void> flushPersist() {
+    // _persist already coalesces; awaiting it ensures the latest state
+    // is on disk before the OS may kill us.
+    return _persist();
+  }
+
   void _refreshDebugSnapshot() {
     final s = ref.read(settingsProvider);
     DebugService.instance.refreshStateSnapshot(

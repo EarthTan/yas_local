@@ -104,6 +104,18 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     state = state.copyWith(references: cached);
   }
 
+  /// Cancel any pending debounced save and persist immediately. Used by
+  /// the app-lifecycle observer on `paused` / `detached` so the 500ms
+  /// debounce window cannot drop data when the app is backgrounded.
+  void flushPendingSave() {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    final id = _saveTaskId;
+    _saveTaskId = null;
+    if (id == null) return;
+    ReferenceStore.save(id, state.references);
+  }
+
   /// Retry generation for a single question — replaces the cached
   /// reference for that questionNumber with a fresh one from the VLM.
   Future<void> retryGenerate(String taskId, int questionNumber) async {
@@ -409,6 +421,6 @@ final qwenFactoryProvider = Provider<QwenService Function(Ref ref)?>(
 );
 
 final strategyProvider =
-    StateNotifierProvider.autoDispose<StrategyNotifier, StrategyState>((ref) {
+    StateNotifierProvider<StrategyNotifier, StrategyState>((ref) {
       return StrategyNotifier(ref, qwenFactory: ref.read(qwenFactoryProvider));
     });

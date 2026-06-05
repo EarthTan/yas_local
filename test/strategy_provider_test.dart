@@ -563,6 +563,30 @@ void main() {
       // call would throw StateError.
     });
 
+    test('flushPendingSave persists immediately (no debounce wait)', () async {
+      final c = _container(tmp: tmp);
+      // Keep strategyProvider pinned even after we drop autoDispose, so the
+      // test is robust to either provider lifecycle.
+      final sub = c.listen(strategyProvider, (prev, next) {});
+      addTearDown(sub.close);
+      final n = c.read(strategyProvider.notifier);
+      await n.load('t1');
+      final ref = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: [const CheckpointDef(id: 'cp1', description: 'd', points: 2)],
+      );
+      c.read(strategyProvider.notifier).state = StrategyState(references: [ref]);
+      n.editCheckpoint(1, 'cp1', description: 'updated');
+      // Within 500ms, file should NOT yet exist.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final cacheFile = File('${tmp.path}/reference_t1.json');
+      expect(await cacheFile.exists(), isFalse);
+      // flushPendingSave writes immediately.
+      n.flushPendingSave();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(await cacheFile.exists(), isTrue);
+    });
+
     test('sendMessage schedules a debounced save (500ms)', () async {
       // Build a container that uses a *fake* configured SettingsNotifier
       // (the real one's `_load()` would overwrite our apiKey with the empty
