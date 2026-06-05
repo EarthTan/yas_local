@@ -52,5 +52,74 @@ void main() {
     });
   });
 
-  // Widget tests added in Task 3
+  group('RichContent widget', () {
+    testWidgets('纯文本不崩溃，渲染 MarkdownBody', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: RichContent('普通文本'))),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('加粗 Markdown 不崩溃', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: RichContent('**加粗内容**'))),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('HTML 下划线 <u> 不崩溃', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+            home: Scaffold(body: RichContent('<u>下划线文本</u>'))),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('行内 LaTeX 不崩溃', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RichContent(r'公式 $$E = mc^2$$ 示例'),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('块级 LaTeX 不崩溃', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RichContent(r'$$$$\int_0^\infty e^{-x}\,dx = 1$$$$'),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('空字符串不崩溃', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: RichContent(''))),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+
+    testWidgets('style 参数被接受不崩溃', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: RichContent('文字', style: TextStyle(fontSize: 20)),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(MarkdownBody), findsOneWidget);
+    });
+  });
 }
