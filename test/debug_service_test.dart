@@ -20,8 +20,8 @@ void main() {
       expect(DebugService.instance.enabled, isTrue);
     });
 
-    test('recordQwenCall is a no-op when disabled', () {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
+    test('recordQwenCall is a no-op when disabled', () async {
+      await DebugService.instance.recordQwenCall(QwenCallRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         model: 'm',
@@ -34,13 +34,13 @@ void main() {
       expect(DebugService.instance.qwenCalls, isEmpty);
     });
 
-    test('recordEvent is a no-op when disabled', () {
-      DebugService.instance.recordEvent(scope: 'task:1', message: 'x');
+    test('recordEvent is a no-op when disabled', () async {
+      await DebugService.instance.recordEvent(scope: 'task:1', message: 'x');
       expect(DebugService.instance.events, isEmpty);
     });
 
-    test('recordJsonAttempt is a no-op when disabled', () {
-      DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+    test('recordJsonAttempt is a no-op when disabled', () async {
+      await DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         inputSnippet: '',
@@ -55,8 +55,8 @@ void main() {
       DebugService.instance.setEnabled(true);
     });
 
-    test('recordQwenCall stores a record', () {
-      DebugService.instance.recordQwenCall(QwenCallRecord(
+    test('recordQwenCall stores a record', () async {
+      await DebugService.instance.recordQwenCall(QwenCallRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         model: 'm',
@@ -69,14 +69,14 @@ void main() {
       expect(DebugService.instance.qwenCalls, hasLength(1));
     });
 
-    test('recordEvent stores a record with default info level', () {
-      DebugService.instance.recordEvent(scope: 'task:1', message: 'start');
+    test('recordEvent stores a record with default info level', () async {
+      await DebugService.instance.recordEvent(scope: 'task:1', message: 'start');
       expect(DebugService.instance.events.single.message, 'start');
       expect(DebugService.instance.events.single.level, EventLevel.info);
     });
 
-    test('recordJsonAttempt stores a record', () {
-      DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+    test('recordJsonAttempt stores a record', () async {
+      await DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         inputSnippet: 'raw',
@@ -91,9 +91,9 @@ void main() {
       DebugService.instance.setEnabled(true);
     });
 
-    test('qwenCalls caps at qwenCapacity (200), evicting oldest', () {
+    test('qwenCalls caps at qwenCapacity (200), evicting oldest', () async {
       for (var i = 0; i < DebugService.qwenCapacity + 5; i++) {
-        DebugService.instance.recordQwenCall(QwenCallRecord(
+        await DebugService.instance.recordQwenCall(QwenCallRecord(
           timestamp: DateTime.now(),
           scope: 'grade',
           model: 'm',
@@ -110,17 +110,17 @@ void main() {
       expect(DebugService.instance.qwenCalls.first.responseContent, 'call-5');
     });
 
-    test('events cap at eventCapacity (1000), evicting oldest', () {
+    test('events cap at eventCapacity (1000), evicting oldest', () async {
       for (var i = 0; i < DebugService.eventCapacity + 3; i++) {
-        DebugService.instance.recordEvent(scope: 's', message: 'm-$i');
+        await DebugService.instance.recordEvent(scope: 's', message: 'm-$i');
       }
       expect(DebugService.instance.events, hasLength(DebugService.eventCapacity));
       expect(DebugService.instance.events.first.message, 'm-3');
     });
 
-    test('jsonAttempts cap at jsonAttemptCapacity (200), evicting oldest', () {
+    test('jsonAttempts cap at jsonAttemptCapacity (200), evicting oldest', () async {
       for (var i = 0; i < DebugService.jsonAttemptCapacity + 2; i++) {
-        DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+        await DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
           timestamp: DateTime.now(),
           scope: 'grade',
           inputSnippet: 'i-$i',
@@ -170,8 +170,8 @@ void main() {
       DebugService.instance.setEnabled(true);
     });
 
-    test('clears all buffers and snapshot', () {
-      DebugService.instance.recordEvent(scope: 's', message: 'm');
+    test('clears all buffers and snapshot', () async {
+      await DebugService.instance.recordEvent(scope: 's', message: 'm');
       DebugService.instance.refreshStateSnapshot(
         tasks: ['t'], references: ['r'], settings: 's',
       );
@@ -194,7 +194,7 @@ void main() {
     test('notifies listeners on recordQwenCall', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
-      DebugService.instance.recordQwenCall(QwenCallRecord(
+      await DebugService.instance.recordQwenCall(QwenCallRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         model: 'm',
@@ -204,39 +204,36 @@ void main() {
         status: QwenCallStatus.ok,
         messages: const [],
       ));
-      // record* is void async — let the microtask queue drain so the
-      // listener (which fires inside _dispatch after the buffer is updated)
-      // gets a chance to run.
-      await Future<void>.delayed(Duration.zero);
+      // The listener fires inside _dispatch (synchronously after each
+      // sink.write completes) — by the time record* returns, the listener
+      // has already been notified.
       expect(notified, 1);
     });
 
     test('notifies listeners on recordEvent', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
-      DebugService.instance.recordEvent(scope: 's', message: 'm');
-      await Future<void>.delayed(Duration.zero);
+      await DebugService.instance.recordEvent(scope: 's', message: 'm');
       expect(notified, 1);
     });
 
     test('notifies listeners on recordJsonAttempt', () async {
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
-      DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
+      await DebugService.instance.recordJsonAttempt(JsonAttemptRecord(
         timestamp: DateTime.now(),
         scope: 'identify',
         inputSnippet: 'x',
         attempts: const [],
       ));
-      await Future<void>.delayed(Duration.zero);
       expect(notified, 1);
     });
 
-    test('does not notify when disabled (recordX is no-op)', () {
+    test('does not notify when disabled (recordX is no-op)', () async {
       DebugService.instance.setEnabled(false);
       var notified = 0;
       DebugService.instance.changes.addListener(() => notified++);
-      DebugService.instance.recordEvent(scope: 's', message: 'm');
+      await DebugService.instance.recordEvent(scope: 's', message: 'm');
       expect(notified, 0);
     });
   });
@@ -246,12 +243,15 @@ void main() {
       DebugService.instance.setEnabled(true);
     });
 
-    test('commit records attempts and finalException', () {
+    test('commit records attempts and finalException', () async {
       final b = JsonAttemptBuilder(scope: 'identify', input: 'a' * 500);
       b.record('strip_thinking', ok: true);
       b.record('fence_object', ok: false, error: 'parse failed');
       b.markFailed('JsonParseException: no object');
       b.commit();
+      // commit() fires recordJsonAttempt fire-and-forget; let the dispatch
+      // microtask settle before asserting on the buffer.
+      await Future<void>.delayed(Duration.zero);
 
       final r = DebugService.instance.jsonAttempts.single;
       expect(r.scope, 'identify');
@@ -262,7 +262,7 @@ void main() {
       expect(r.inputSnippet, hasLength(200)); // truncated
     });
 
-    test('commit is no-op when service disabled', () {
+    test('commit is no-op when service disabled', () async {
       DebugService.instance.setEnabled(false);
       final b = JsonAttemptBuilder(scope: 'identify', input: 'x');
       b.record('strip_thinking', ok: true);
@@ -277,8 +277,7 @@ void main() {
       final b = InMemoryRingSink();
       final svc = DebugService.withSinks([a, b]);
       svc.setEnabled(true);
-      svc.recordEvent(scope: 's', message: 'x');
-      await Future<void>.delayed(Duration.zero);
+      await svc.recordEvent(scope: 's', message: 'x');
       expect(a.events, hasLength(1));
       expect(b.events, hasLength(1));
     });
@@ -288,8 +287,7 @@ void main() {
       final b = _ThrowingSink();
       final svc = DebugService.withSinks([b, a]);
       svc.setEnabled(true);
-      svc.recordEvent(scope: 's', message: 'x');
-      await Future<void>.delayed(Duration.zero);
+      await svc.recordEvent(scope: 's', message: 'x');
       expect(a.events, hasLength(1));
     });
   });
@@ -299,8 +297,7 @@ void main() {
       DebugService.instance.setEnabled(true);
       final sink = InMemoryRingSink();
       DebugService.instance.addSink(sink);
-      DebugService.instance.recordEvent(scope: 's', message: 'x');
-      await Future<void>.delayed(Duration.zero);
+      await DebugService.instance.recordEvent(scope: 's', message: 'x');
       expect(sink.events, hasLength(1));
     });
   });
@@ -309,7 +306,7 @@ void main() {
     test('recordQwenCall updates DebugStats', () async {
       final svc = DebugService.withSinks([InMemoryRingSink()]);
       svc.setEnabled(true);
-      svc.recordQwenCall(QwenCallRecord(
+      await svc.recordQwenCall(QwenCallRecord(
         timestamp: DateTime.now(),
         scope: 'grade',
         model: 'm',
@@ -319,7 +316,6 @@ void main() {
         status: QwenCallStatus.ok,
         messages: const [],
       ));
-      await Future<void>.delayed(Duration.zero);
       final snap = svc.stats.snapshot();
       expect(snap.byScope[DebugScope.grade]!.calls, 1);
     });

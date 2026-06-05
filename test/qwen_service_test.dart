@@ -55,6 +55,9 @@ void main() {
     svc.dio.httpClientAdapter = _MockAdapter(_okJson);
 
     await svc.identifyQuestions(const []); // empty list, will still send
+    // The Dio interceptor's recordQwenCall is fire-and-forget; drain the
+    // microtask queue so the buffer reflects the captured call.
+    await Future<void>.delayed(Duration.zero);
 
     final calls = DebugService.instance.qwenCalls;
     expect(calls, hasLength(1));
@@ -72,6 +75,7 @@ void main() {
     try {
       await svc.identifyQuestions(const []);
     } catch (_) {}
+    await Future<void>.delayed(Duration.zero);
 
     final calls = DebugService.instance.qwenCalls;
     expect(calls, hasLength(1));
@@ -104,6 +108,9 @@ void main() {
 
     await expectLater(
         () => svc.identifyQuestions(const []), throwsA(isA<JsonParseException>()));
+    // The interceptor recordQwenCall is fire-and-forget; drain microtasks so
+    // both records (interceptor ok + catch parseError) are in the buffer.
+    await Future<void>.delayed(Duration.zero);
 
     final calls = DebugService.instance.qwenCalls;
     // Expect at least one ok (from interceptor) AND one parseError (from the catch)

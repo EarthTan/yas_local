@@ -69,7 +69,7 @@ void main() {
   });
 
   testWidgets('Qwen tab renders a recorded call', (tester) async {
-    DebugService.instance.recordQwenCall(QwenCallRecord(
+    await DebugService.instance.recordQwenCall(QwenCallRecord(
       timestamp: DateTime.now(),
       scope: 'identify',
       model: 'qwen-vl-max',
@@ -98,7 +98,9 @@ void main() {
     expect(find.text('暂无 Qwen 调用记录'), findsOneWidget);
 
     // Record a call after the screen is mounted — no manual refresh allowed.
-    DebugService.instance.recordQwenCall(QwenCallRecord(
+    // Awaiting ensures the dispatch (and the listener notification that
+    // triggers rebuild) has completed before pump() runs.
+    await DebugService.instance.recordQwenCall(QwenCallRecord(
       timestamp: DateTime.now(),
       scope: 'grade',
       model: 'qwen-vl-max',

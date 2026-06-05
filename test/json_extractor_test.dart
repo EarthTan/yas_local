@@ -9,41 +9,50 @@ void main() {
   });
 
   group('scope propagation', () {
-    test('requireObject defaults scope to "caller" when not specified', () {
+    test('requireObject defaults scope to "caller" when not specified', () async {
       JsonExtractor.requireObject('{"a": 1}');
+      // commit() fires recordJsonAttempt fire-and-forget; drain the
+      // microtask queue so the buffer is updated before we read it.
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
     });
 
-    test('requireObject records the scope passed in', () {
+    test('requireObject records the scope passed in', () async {
       JsonExtractor.requireObject('{"a": 1}', scope: 'strategy');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
     });
 
-    test('requireList defaults scope to "caller" when not specified', () {
+    test('requireList defaults scope to "caller" when not specified', () async {
       JsonExtractor.requireList('[1, 2]');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'caller');
     });
 
-    test('requireList records the scope passed in', () {
+    test('requireList records the scope passed in', () async {
       JsonExtractor.requireList('[1, 2]', scope: 'grade');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'grade');
     });
 
-    test('requireObjectWithReasoning threads scope to the underlying require', () {
+    test('requireObjectWithReasoning threads scope to the underlying require', () async {
       JsonExtractor.requireObjectWithReasoning('{"a": 1}', scope: 'refine');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'refine');
     });
 
-    test('requireListWithReasoning threads scope to the underlying require', () {
+    test('requireListWithReasoning threads scope to the underlying require', () async {
       JsonExtractor.requireListWithReasoning('[1]', fromKey: null, scope: 'identify');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'identify');
     });
 
-    test('failed extraction also records the scope', () {
+    test('failed extraction also records the scope', () async {
       expect(
         () => JsonExtractor.requireObject('not json at all', scope: 'strategy'),
         throwsA(isA<JsonParseException>()),
       );
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts.single.scope, 'strategy');
     });
   });
@@ -296,16 +305,18 @@ void main() {
       DebugService.instance.setEnabled(true);
     });
 
-    test('successful extraction records an attempt', () {
+    test('successful extraction records an attempt', () async {
       JsonExtractor.requireObject('{"a": 1}');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts, hasLength(1));
       expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
     });
 
-    test('failed extraction records attempts including the failing branch and finalException', () {
+    test('failed extraction records attempts including the failing branch and finalException', () async {
       try {
         JsonExtractor.requireObject('this is not json');
       } catch (_) {}
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts, hasLength(1));
       final r = DebugService.instance.jsonAttempts.single;
       expect(r.attempts.where((a) => a.ok), isNotEmpty); // strip_thinking succeeded
@@ -313,24 +324,27 @@ void main() {
       expect(r.finalException, isNotNull);
     });
 
-    test('successful list extraction records an attempt', () {
+    test('successful list extraction records an attempt', () async {
       JsonExtractor.requireList('[1, 2, 3]');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts, hasLength(1));
       expect(DebugService.instance.jsonAttempts.single.attempts.last.ok, isTrue);
     });
 
-    test('failed list extraction records finalException', () {
+    test('failed list extraction records finalException', () async {
       try {
         JsonExtractor.requireList('not a list');
       } catch (_) {}
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts, hasLength(1));
       final r = DebugService.instance.jsonAttempts.single;
       expect(r.attempts.where((a) => !a.ok), isNotEmpty);
       expect(r.finalException, isNotNull);
     });
 
-    test('fromKey success records the fromKey method name', () {
+    test('fromKey success records the fromKey method name', () async {
       JsonExtractor.requireList('{"questions": [1, 2]}', fromKey: 'questions');
+      await Future<void>.delayed(Duration.zero);
       expect(DebugService.instance.jsonAttempts, hasLength(1));
       final r = DebugService.instance.jsonAttempts.single;
       final fromKeyAttempt = r.attempts.firstWhere(

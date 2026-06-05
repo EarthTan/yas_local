@@ -10,8 +10,7 @@ void main() {
   });
 
   test('initial state reflects service', () async {
-    DebugService.instance.recordEvent(scope: 's', message: 'hi');
-    await Future<void>.delayed(Duration.zero);
+    await DebugService.instance.recordEvent(scope: 's', message: 'hi');
     final container = ProviderContainer();
     addTearDown(container.dispose);
     final state = container.read(debugProvider);
@@ -25,8 +24,7 @@ void main() {
     final notifier = container.read(debugProvider.notifier);
     expect(notifier.state.events, isEmpty);
 
-    DebugService.instance.recordEvent(scope: 's', message: 'after');
-    await Future<void>.delayed(Duration.zero);
+    await DebugService.instance.recordEvent(scope: 's', message: 'after');
     notifier.refresh();
     expect(notifier.state.events.single.message, 'after');
   });
@@ -38,12 +36,9 @@ void main() {
     expect(notifier.state.events, isEmpty);
 
     // No manual refresh() call — provider should pick up the change via the
-    // service's Listenable.
-    DebugService.instance.recordEvent(scope: 's', message: 'auto');
-    // record* is void async — let the microtask queue drain so the listener
-    // (which fires inside _dispatch after the buffer is updated) gets a
-    // chance to run.
-    await Future<void>.delayed(Duration.zero);
+    // service's Listenable (which fires inside _dispatch, before record*
+    // returns).
+    await DebugService.instance.recordEvent(scope: 's', message: 'auto');
     expect(notifier.state.events.single.message, 'auto');
   });
 
@@ -53,7 +48,7 @@ void main() {
     final notifier = container.read(debugProvider.notifier);
     expect(notifier.state.qwenCalls, isEmpty);
 
-    DebugService.instance.recordQwenCall(QwenCallRecord(
+    await DebugService.instance.recordQwenCall(QwenCallRecord(
       timestamp: DateTime.now(),
       scope: 'identify',
       model: 'm',
@@ -64,7 +59,6 @@ void main() {
       messages: const [],
       responseContent: 'payload',
     ));
-    await Future<void>.delayed(Duration.zero);
     expect(notifier.state.qwenCalls.single.responseContent, 'payload');
   });
 }

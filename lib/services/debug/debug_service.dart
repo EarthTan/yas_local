@@ -227,12 +227,12 @@ class DebugService {
     _sinks = [..._sinks, sink];
   }
 
-  void recordQwenCall(QwenCallRecord record) async {
+  Future<void> recordQwenCall(QwenCallRecord record) async {
     if (!_enabled) return;
     await _dispatch(record);
   }
 
-  void recordEvent({
+  Future<void> recordEvent({
     required String scope,
     required String message,
     EventLevel level = EventLevel.info,
@@ -248,7 +248,7 @@ class DebugService {
     ));
   }
 
-  void recordJsonAttempt(JsonAttemptRecord record) async {
+  Future<void> recordJsonAttempt(JsonAttemptRecord record) async {
     if (!_enabled) return;
     await _dispatch(record);
   }
