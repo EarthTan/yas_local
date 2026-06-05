@@ -11,13 +11,26 @@ class CaptureScreen extends ConsumerStatefulWidget {
   final String taskId;
   const CaptureScreen({super.key, required this.taskId});
   @override
-  ConsumerState<CaptureScreen> createState() => _S();
+  CaptureScreenState createState() => CaptureScreenState();
 }
 
-class _S extends ConsumerState<CaptureScreen> {
+class CaptureScreenState extends ConsumerState<CaptureScreen> {
   final _picker = ImagePicker();
   final List<File> _photos = [];
   bool _busy = false;
+
+  /// Test-only seam: stage photos in [_photos] without going through
+  /// [ImagePicker]. Used by widget tests that drive the confirm-dialog
+  /// flow without a real photo library. Wraps in [setState] so the
+  /// "下一步" AppBar action appears.
+  @visibleForTesting
+  void debugStagePhotos(List<File> photos) {
+    setState(() {
+      _photos
+        ..clear()
+        ..addAll(photos);
+    });
+  }
 
   Future<void> _shoot() async {
     if (Platform.isMacOS) {
@@ -60,8 +73,8 @@ class _S extends ConsumerState<CaptureScreen> {
       final path = await ImageStore.persist(_photos[i].path, id);
       subs.add(Submission(id: id, taskId: widget.taskId, label: '第 ${i + 1} 份', imagePath: path));
     }
-    final existing = ref.read(taskProvider).submissions
-        .where((s) => s.taskId == widget.taskId).length;
+    final existing =
+        ref.read(taskProvider.notifier).submissionsFor(widget.taskId).length;
     if (existing > 0) {
       if (!mounted) return;
       final ok = await showDialog<bool>(
