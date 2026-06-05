@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/reference_answer.dart';
 import '../../models/strategy_message.dart';
 import '../../providers/strategy_provider.dart';
+import '../../widgets/rich_content.dart';
 
 /// Modal bottom sheet for refining the AI's strategy for one question via
 /// multi-turn chat.
@@ -270,7 +271,9 @@ class _MessageBubble extends StatelessWidget {
           color: isUser ? Colors.blue.shade100 : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(message.content, style: const TextStyle(fontSize: 14)),
+        child: isUser
+            ? Text(message.content, style: const TextStyle(fontSize: 14))
+            : RichContent(message.content, style: const TextStyle(fontSize: 14)),
       ),
     );
   }

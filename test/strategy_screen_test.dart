@@ -1076,10 +1076,15 @@ void main() {
       final notifier = await _pumpChatSheet(tester, refs: refs);
       await tester.pumpAndSettle();
       // 关键断言 1：初始就滚到底。
-      final listScrollable = find.descendant(
-        of: find.byType(ListView),
-        matching: find.byType(Scrollable),
-      );
+      // Use .first to pick the ListView's own Scrollable — RichContent (via
+      // MarkdownBody with selectable:true) adds extra Scrollable descendants
+      // inside each bubble, so we can no longer expect a single match.
+      final listScrollable = find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
       ScrollableState scrollable = tester.state<ScrollableState>(
         listScrollable,
       );

@@ -146,7 +146,7 @@ class QuestionPage extends StatelessWidget {
                 ],
               ),
             ),
-          if (cpSum != maxPoints)
+          if (!failed && cpSum != maxPoints)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
