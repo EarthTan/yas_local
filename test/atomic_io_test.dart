@@ -1,5 +1,6 @@
 // Pure-Dart unit tests for atomic_io helpers. No Flutter binding required.
 
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -160,6 +161,37 @@ void main() {
           .toList();
       expect(brokenFiles.length, greaterThanOrEqualTo(2),
           reason: 'two failures must produce two distinct quarantine names');
+    });
+
+    test('readJsonOrQuarantine returns survivors when one record is bad',
+        () async {
+      final f = File(p.join(tmp.path, 'mixed.json'));
+      await f.writeAsString(jsonEncode([
+        {'ok': 1},
+        {'this_field_does_not_exist_for_dummy': 'value'},
+        {'ok': 2},
+      ]));
+      int bad = 0;
+      final result = readJsonOrQuarantine<List<int>>(
+        f,
+        (parsed) {
+          final list = (parsed as List).cast<Map<String, dynamic>>();
+          return [
+            for (final m in list)
+              if (m.containsKey('ok'))
+                (m['ok'] as int)
+              else
+                (() {
+                  bad++;
+                  throw const FormatException('bad');
+                })(),
+          ];
+        },
+        () => <int>[],
+        scope: 'test',
+      );
+      expect(await result, [1, 2]);
+      expect(bad, 1);
     });
   });
 }
