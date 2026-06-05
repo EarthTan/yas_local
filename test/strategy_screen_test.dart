@@ -438,6 +438,7 @@ void main() {
             ),
             maxPoints: 5,
             questionType: '主观题',
+            questionText: '已知 z = 1 + i，求 |z| 的值。',
             onEditCheckpoint: (_, _) {},
             onAddCheckpoint: () {},
             onRetry: () {},
@@ -449,6 +450,80 @@ void main() {
     expect(find.text('完整'), findsOneWidget);
     expect(find.text('3分'), findsOneWidget);
     expect(find.text('2分'), findsOneWidget);
+  });
+
+  testWidgets('QuestionPage 渲染题面文字', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 1,
+              checkpoints: [
+                CheckpointDef(id: 'q1-cp0', description: '答对', points: 5),
+              ],
+            ),
+            maxPoints: 5,
+            questionType: '主观题',
+            questionText: '已知 z = 1 + i，求 |z| 的值。',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('已知 z = 1 + i，求 |z| 的值。'), findsOneWidget);
+    expect(find.text('暂无题面文字'), findsNothing);
+  });
+
+  testWidgets('QuestionPage 题面为空时显示「未识别题面」提示', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 3,
+              checkpoints: [
+                CheckpointDef(id: 'q3-cp0', description: '答对', points: 8),
+              ],
+            ),
+            maxPoints: 8,
+            questionType: '主观题',
+            questionText: '',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('暂无题面文字'), findsOneWidget);
+    expect(find.text('建议在「识别题目」步骤补充'), findsOneWidget);
+  });
+
+  testWidgets('QuestionPage 题面为 null 时也显示「未识别题面」提示', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuestionPage(
+            reference: const ReferenceAnswer(
+              questionNumber: 3,
+              checkpoints: [
+                CheckpointDef(id: 'q3-cp0', description: '答对', points: 8),
+              ],
+            ),
+            maxPoints: 8,
+            questionType: '主观题',
+            onEditCheckpoint: (_, _) {},
+            onAddCheckpoint: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('暂无题面文字'), findsOneWidget);
   });
 
   testWidgets('QuestionPage 点击 checkpoint 行触发 onEditCheckpoint', (
@@ -901,8 +976,9 @@ void main() {
       await tester.tap(find.widgetWithText(OutlinedButton, '修改策略'));
       await tester.pumpAndSettle();
       expect(find.byType(ChatSheet), findsOneWidget);
-      // Header shows the question text since it's non-empty.
-      expect(find.textContaining('已知 z = 1 + i'), findsOneWidget);
+      // Both the QuestionPage stem and the ChatSheet header now show the
+      // question text since the rubric has a non-empty questionText.
+      expect(find.textContaining('已知 z = 1 + i'), findsNWidgets(2));
       // Empty-state hint is visible.
       expect(find.text('还没有对话。告诉 AI 你想怎么调整批改策略。'), findsOneWidget);
     });

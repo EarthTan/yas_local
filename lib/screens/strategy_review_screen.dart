@@ -244,6 +244,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   reference: r,
                   maxPoints: rubricItem?.maxPoints ?? 0,
                   questionType: rubricItem?.type == 'objective' ? '客观题' : '主观题',
+                  questionText: rubricItem?.questionText,
                   onEditCheckpoint: (id, cp) => _openEditSheet(r, id, cp),
                   onAddCheckpoint: () => _openAddSheet(r),
                   onRetry: () =>

@@ -10,6 +10,12 @@ import '../../models/reference_answer.dart';
 ///
 /// **Layout (top → bottom):**
 /// - Header row: `第 N 题`, question-type chip, `maxPoints 分`.
+/// - Question-stem block: when [questionText] is non-null/non-empty, renders
+///   it on a light-blue background; when it is null/empty, renders a yellow
+///   "未识别题面" hint pointing the teacher to the identify step. A null
+///   [questionText] means the rubric has no stem text for this question
+///   (e.g. identify step never ran, or VLM missed it) and the hint gives the
+///   teacher a way to recover.
 /// - Optional orange "总分 = X（与满分不一致）" warning when the sum of
 ///   checkpoint points does not equal [maxPoints].
 /// - Failure banner (red) when [reference] has no checkpoints. If
@@ -30,6 +36,9 @@ class QuestionPage extends StatelessWidget {
   final ReferenceAnswer reference;
   final int maxPoints;
   final String questionType;
+  // Question stem (题干). Null or empty means the rubric has no text for this
+  // question — we surface a "未识别题面" hint in that case.
+  final String? questionText;
   final void Function(String checkpointId, CheckpointDef cp) onEditCheckpoint;
   final VoidCallback onAddCheckpoint;
   final VoidCallback? onRetry;
@@ -42,6 +51,7 @@ class QuestionPage extends StatelessWidget {
     required this.onEditCheckpoint,
     required this.onAddCheckpoint,
     this.onRetry,
+    this.questionText,
   });
 
   @override
@@ -49,6 +59,8 @@ class QuestionPage extends StatelessWidget {
     final r = reference;
     final cpSum = r.checkpoints.fold<int>(0, (s, c) => s + c.points);
     final failed = r.checkpoints.isEmpty;
+    final stem = (questionText ?? '').trim();
+    final hasStem = stem.isNotEmpty;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -71,6 +83,68 @@ class QuestionPage extends StatelessWidget {
               Text('$maxPoints 分', style: TextStyle(color: Colors.grey[600])),
             ],
           ),
+          const SizedBox(height: 10),
+          if (hasStem)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                border: Border.all(color: Colors.blue.shade100),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                stem,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[900],
+                  height: 1.5,
+                ),
+              ),
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                border: Border.all(color: Colors.amber.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.amber.shade800,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '暂无题面文字',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          '建议在「识别题目」步骤补充',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (cpSum != maxPoints)
             Padding(
               padding: const EdgeInsets.only(top: 4),
