@@ -202,7 +202,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     ];
 
     try {
-      final qwen = QwenService(settings);
+      final qwen = _newQwen();
       final updated = await qwen.refineStrategy(
         rubric: rubricItem,
         current: current,
@@ -257,6 +257,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         data: {'error': e.toString()},
       );
     }
+    _scheduleSave(taskId);
   }
 
   void confirmQuestion(int questionNum) {

@@ -477,5 +477,52 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 600));
       expect(await cacheFile2.exists(), isTrue);
     });
+
+    test('sendMessage schedules a debounced save (500ms)', () async {
+      // Build a container that uses a *fake* configured SettingsNotifier
+      // (the real one's `_load()` would overwrite our apiKey with the empty
+      // on-disk value) and a fake TaskNotifier (avoids awaiting addTask
+      // which would let SettingsNotifier._load() complete and overwrite
+      // the apiKey).
+      final task = _taskWithRubric(const [
+        RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5),
+      ]);
+      final c = ProviderContainer(overrides: [
+        settingsProvider.overrideWith((ref) => _FakeConfiguredSettingsNotifier()),
+        taskProvider.overrideWith((ref) => _FakeTaskNotifier(ref, task)),
+        qwenFactoryProvider.overrideWithValue((ref) => _StubQwen()),
+      ]);
+      // Keep the autoDispose strategyProvider alive for the test.
+      final sub = c.listen(strategyProvider, (prev, next) {});
+      addTearDown(() async {
+        // Drain pending microtasks + wait out the 500ms debounce so the
+        // timer fires before dispose.
+        for (var i = 0; i < 5; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        sub.close();
+        c.dispose();
+      });
+      final n = c.read(strategyProvider.notifier);
+      // Seed the reference directly. We do NOT call n.load('t1') or
+      // addTask(...) here because any await would let
+      // SettingsNotifier._load() complete and overwrite our configured
+      // apiKey with the empty on-disk value.
+      final ref = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: [const CheckpointDef(id: 'cp1', description: 'd', points: 2)],
+      );
+      n.state = StrategyState(references: [ref]);
+      await n.sendMessage('t1', 1, '请更严格');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      final cacheFile = File('${tmp.path}/reference_t1.json');
+      expect(await cacheFile.exists(), isTrue);
+      // The cache file should contain the chat history (assistant response
+      // from _StubQwen.refineStrategy returns the same ref, but the notifier
+      // appends an assistant message).
+      final raw = await cacheFile.readAsString();
+      expect(raw.contains('已更新批改策略'), isTrue);
+    });
   });
 }
