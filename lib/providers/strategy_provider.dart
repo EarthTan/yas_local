@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
@@ -53,6 +55,28 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   final Ref ref;
   final QwenService Function(Ref ref)? _qwenFactory;
 
+  /// Currently-loaded task id. Set by [load]. Used by [_scheduleSave] to know
+  /// which `reference_<taskId>.json` to write to when a mutator fires.
+  String? _saveTaskId;
+
+  /// Pending debounced save. Cancelled and rescheduled on each mutation so a
+  /// burst of edits only writes once, 500ms after the last one.
+  Timer? _saveDebounce;
+
+  void _scheduleSave(String taskId) {
+    _saveDebounce?.cancel();
+    _saveTaskId = taskId;
+    _saveDebounce = Timer(const Duration(milliseconds: 500), () {
+      _saveDebounce = null;
+      final id = _saveTaskId;
+      if (id == null) return;
+      _saveTaskId = null;
+      // Fire-and-forget; notifier lives for the app's lifetime so this
+      // cannot race with dispose.
+      ReferenceStore.save(id, state.references);
+    });
+  }
+
   QwenService _newQwen() {
     final factory = _qwenFactory;
     return factory != null
@@ -63,6 +87,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   /// Loads cached references from disk into state (no generation — bulk
   /// generation is owned by JobQueueNotifier.startStrategy).
   Future<void> load(String taskId) async {
+    _saveTaskId = taskId;
     final cached = await ReferenceStore.load(taskId);
     state = state.copyWith(references: cached);
   }
@@ -236,10 +261,12 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
   void confirmQuestion(int questionNum) {
     _updateRef(questionNum, (r) => r.copyWith(confirmed: true));
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void unconfirmQuestion(int questionNum) {
     _updateRef(questionNum, (r) => r.copyWith(confirmed: false));
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void confirmAll() {
@@ -248,6 +275,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
           .map((r) => r.copyWith(confirmed: true))
           .toList(),
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   /// Saves all references (confirmed or not) to disk for Phase 2 to use.
@@ -296,6 +324,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'editCheckpoint $checkpointId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void addCheckpoint(
@@ -326,6 +355,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'addCheckpoint $newId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void removeCheckpoint(int questionNumber, String checkpointId) {
@@ -346,6 +376,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'removeCheckpoint $checkpointId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 }
 
