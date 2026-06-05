@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
@@ -9,6 +10,7 @@ import 'package:markdown/markdown.dart' as md;
 ///
 /// Block pass runs before inline to prevent $$$$...$$$$ being split
 /// by the inline rule (since $$$$ starts with $$).
+@visibleForTesting
 String normalizeLatexDelimiters(String text) {
   if (text.isEmpty) return text;
 
@@ -19,6 +21,9 @@ String normalizeLatexDelimiters(String text) {
   );
 
   // Step 2 (inline): $$...$$ → \(...\)
+  // Note: formula content must not contain literal $ characters
+  // (rare in standard mathematical notation; no silent crash — raw $$ is
+  // passed through to MarkdownBody as plain text if the regex doesn't match).
   result = result.replaceAllMapped(
     RegExp(r'\$\$([^$\n]+?)\$\$'),
     (m) => '\\(${m[1]}\\)',
@@ -55,15 +60,20 @@ class _LatexDisplaySyntax extends md.BlockSyntax {
       lines.add(parser.current.content);
       parser.advance();
     }
-    if (!parser.isDone) parser.advance(); // skip \]
-    final latex = lines.join('\n').trim();
-    // Use an empty element with an attribute so no child text nodes are emitted.
-    // Child text nodes force MarkdownBuilder to push an _InlineElement into
-    // _inlines that must be cleared by _addAnonymousBlockIfNeeded — which only
-    // clears when inline.children.isNotEmpty — causing assertion failures.
-    final element = md.Element.empty('latex-block');
-    element.attributes['latex'] = latex;
-    return element;
+    if (!parser.isDone) {
+      parser.advance(); // skip \]
+      // Closing \] found — emit as latex-block.
+      // Use an empty element with an attribute so no child text nodes are emitted.
+      // Child text nodes force MarkdownBuilder to push an _InlineElement into
+      // _inlines that must be cleared by _addAnonymousBlockIfNeeded — which only
+      // clears when inline.children.isNotEmpty — causing assertion failures.
+      final element = md.Element.empty('latex-block');
+      element.attributes['latex'] = lines.join('\n').trim();
+      return element;
+    }
+    // No closing \] — emit consumed lines as a plain paragraph to avoid
+    // silently dropping document content (e.g. malformed LLM output).
+    return md.Element('p', [md.Text(lines.join('\n'))]);
   }
 }
 
@@ -147,7 +157,10 @@ class _InlineMathBuilder extends MarkdownElementBuilder {
   }
 }
 
-// Module-level constant — created once, shared across all RichContent builds.
+// Module-level constants — created once, shared across all RichContent builds.
+final _blockMathBuilder = _BlockMathBuilder();
+final _inlineMathBuilder = _InlineMathBuilder();
+
 final _mathExtensionSet = md.ExtensionSet(
   [
     ...md.ExtensionSet.gitHubFlavored.blockSyntaxes,
@@ -195,8 +208,8 @@ class RichContent extends StatelessWidget {
       selectable: true,
       extensionSet: _mathExtensionSet,
       builders: {
-        'latex-block': _BlockMathBuilder(),
-        'latex-inline': _InlineMathBuilder(),
+        'latex-block': _blockMathBuilder,
+        'latex-inline': _inlineMathBuilder,
       },
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: baseStyle,
