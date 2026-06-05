@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../models/task.dart';
 import '../models/submission.dart';
+import 'atomic_io.dart';
 
 class StoreData {
   final List<GradingTask> tasks;
@@ -19,15 +20,16 @@ class TaskStore {
         'submissions': subs.map((s) => s.toJson()).toList(),
       });
 
-  static StoreData decode(String raw) {
-    if (raw.trim().isEmpty) return const StoreData([], []);
-    final map = jsonDecode(raw) as Map<String, dynamic>;
+  static StoreData decode(Object? parsed) {
+    if (parsed is! Map) return const StoreData([], []);
     return StoreData(
-      (map['tasks'] as List? ?? [])
-          .map((e) => GradingTask.fromJson(e as Map<String, dynamic>))
+      (parsed['tasks'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(GradingTask.fromJson)
           .toList(),
-      (map['submissions'] as List? ?? [])
-          .map((e) => Submission.fromJson(e as Map<String, dynamic>))
+      (parsed['submissions'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(Submission.fromJson)
           .toList(),
     );
   }
@@ -37,14 +39,29 @@ class TaskStore {
     return File('${dir.path}/$_fileName');
   }
 
+  /// Read the persisted task + submission set. On parse failure the file
+  /// is quarantined (renamed aside + DebugService event) and an empty
+  /// `StoreData` is returned, so a corrupt file can never crash the app
+  /// at startup.
   static Future<StoreData> load() async {
     final f = await _file();
-    if (!await f.exists()) return const StoreData([], []);
-    return decode(await f.readAsString());
+    return readJsonOrQuarantine<StoreData>(
+      f,
+      decode,
+      () => const StoreData([], []),
+      scope: 'task',
+    );
   }
 
+  /// Atomically write [tasks] + [subs] to the on-disk store.
+  ///
+  /// Writes are NOT mutex-protected at the store level — see
+  /// `TaskNotifier._persistChain` in `task_provider.dart:42-58`, which
+  /// serializes every caller. Direct callers (other than the provider)
+  /// can clobber each other; the atomic write ensures partial-state
+  /// crashes don't truncate the file.
   static Future<void> save(List<GradingTask> tasks, List<Submission> subs) async {
     final f = await _file();
-    await f.writeAsString(encode(tasks, subs));
+    await writeJsonAtomic(f, encode(tasks, subs));
   }
 }

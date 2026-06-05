@@ -22,6 +22,9 @@ class RollingFileSink implements DebugSink {
 
   IOSink? _sink;
   String? _currentFilePath;
+  // TODO: migrate to `lib/services/async_lock.dart` `AsyncLock` in a
+  // follow-up — this private duplicate is the original `_Lock` pattern
+  // lifted into the public `AsyncLock` class.
   final _writeLock = _Lock();
 
   String _formatDate(DateTime dt) {

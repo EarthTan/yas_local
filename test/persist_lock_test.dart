@@ -82,4 +82,79 @@ void main() {
     expect(loaded.length, anyOf(1, 2));
     expect(loaded.first.checkpoints.first.description, anyOf('a', 'b'));
   });
+
+  group('H1: save chain does not drop the next write after an error', () {
+    test('write A succeeds, write B fails, write C still lands', () async {
+      ReferenceStore.resetForTest();
+      // Force B to fail by pre-creating a *directory* at the target path.
+      // POSIX rename(2) refuses to overwrite a directory with a file
+      // (EISDIR), so writeJsonAtomic's rename step throws — simulating a
+      // disk-write failure for a real-world transient error.
+      final blockDir = Directory('${tmp.path}/reference_t1.json');
+      await blockDir.create(recursive: true);
+      addTearDown(() async {
+        if (await blockDir.exists()) await blockDir.delete(recursive: true);
+      });
+
+      // Write A: must throw because the target path is a directory.
+      Object? caughtA;
+      try {
+        await ReferenceStore.save('t1', [
+          ReferenceAnswer(
+            questionNumber: 1,
+            checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'A', points: 5)],
+          ),
+        ]);
+      } catch (e) {
+        caughtA = e;
+      }
+      expect(caughtA, isNotNull,
+          reason: 'A should have thrown because the target is a directory');
+
+      // Remove the directory so the next write can succeed.
+      await blockDir.delete(recursive: true);
+
+      // Write B: must succeed and land on disk, NOT be skipped because the
+      // failed A's error handler ran while B was queued.
+      await ReferenceStore.save('t1', [
+        ReferenceAnswer(
+          questionNumber: 1,
+          checkpoints: const [CheckpointDef(id: 'q1-cp0', description: 'B', points: 5)],
+        ),
+      ]);
+
+      final loaded = await ReferenceStore.load('t1');
+      expect(loaded.length, 1, reason: 'one ReferenceAnswer expected');
+      expect(loaded.first.checkpoints.first.description, 'B',
+          reason: 'B must be the surviving writer');
+    });
+  });
+
+  group('H3: load() on corrupt / missing files', () {
+    test('returns [] when the file does not exist', () async {
+      final loaded = await ReferenceStore.load('does-not-exist');
+      expect(loaded, isEmpty);
+    });
+
+    test('on corrupt JSON: renames file to .broken.<scope>… and returns []',
+        () async {
+      ReferenceStore.resetForTest();
+      final f = File('${tmp.path}/reference_t-corrupt.json');
+      await f.create(recursive: true);
+      await f.writeAsString('{ not valid json');
+
+      final loaded = await ReferenceStore.load('t-corrupt');
+      expect(loaded, isEmpty);
+      expect(await f.exists(), isFalse,
+          reason: 'original file should have been renamed aside');
+      // Sibling quarantine file in the same dir.
+      final siblings = tmp
+          .listSync()
+          .map((e) => e.uri.pathSegments.last)
+          .where((n) => n.startsWith('reference_t-corrupt.json.broken.reference.'))
+          .toList();
+      expect(siblings, isNotEmpty,
+          reason: 'expected a .broken.reference.* sibling file');
+    });
+  });
 }

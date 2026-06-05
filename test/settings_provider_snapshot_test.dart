@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:yas_local/models/settings.dart';
@@ -5,8 +7,22 @@ import 'package:yas_local/providers/settings_provider.dart';
 import 'package:yas_local/services/debug/debug_service.dart';
 
 void main() {
-  setUp(() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory tmp;
+  setUp(() async {
+    tmp = await Directory.systemTemp.createTemp('settings_snap_');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (call) async => tmp.path,
+    );
     DebugService.instance.resetForTest();
+  });
+  tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'), null);
+    if (await tmp.exists()) await tmp.delete(recursive: true);
   });
 
   test('update() preserves existing snapshot tasks and references', () async {
