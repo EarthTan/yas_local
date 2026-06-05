@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/checkpoint.dart';
 import '../../models/reference_answer.dart';
+import '../../widgets/rich_content.dart';
 
 /// Scrollable page showing the per-question strategy review for one rubric item.
 ///
@@ -93,7 +94,7 @@ class QuestionPage extends StatelessWidget {
                 border: Border.all(color: Colors.blue.shade100),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: SelectableText(
+              child: RichContent(
                 stem,
                 style: TextStyle(
                   fontSize: 14,
@@ -190,7 +191,7 @@ class QuestionPage extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Expanded(child: Text(c.description)),
+                    Expanded(child: RichContent(c.description)),
                     const SizedBox(width: 8),
                     Text('${c.points}分',
                         style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
@@ -220,7 +221,7 @@ class QuestionPage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.grey.shade200),
                   ),
-                  child: Text(
+                  child: RichContent(
                     r.reasoning!,
                     style: TextStyle(fontSize: 12, color: Colors.grey[800], height: 1.5),
                   ),
