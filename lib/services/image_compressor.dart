@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
@@ -25,6 +26,9 @@ class ImageCompressor {
   /// whether a previous attempt is still in flight (dedup) or already
   /// resolved (re-evaluate, in case the previous attempt fell back).
   static final Map<String, Completer<String>> _inflight = {};
+
+  @visibleForTesting
+  static int get inflightSizeForTest => _inflight.length;
 
   /// Compute the on-disk cache path for [srcPath]. Naming rule: the
   /// relative path under `images/` (excluding the `images/` segment
@@ -74,6 +78,7 @@ class ImageCompressor {
     final completer = Completer<String>();
     _inflight[srcPath] = completer;
     // onError is defense-in-depth: _doCompress never throws in practice.
+    completer.future.whenComplete(() => _inflight.remove(srcPath));
     _doCompress(srcPath).then(completer.complete, onError: completer.completeError);
     return completer.future;
   }

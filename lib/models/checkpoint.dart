@@ -25,8 +25,8 @@ class CheckpointDef {
 
   factory CheckpointDef.fromJson(Map<String, dynamic> json) => CheckpointDef(
         id: (json['id'] as String?) ?? '',
-        description: json['description'] as String,
-        points: json['points'] as int,
+        description: (json['description'] ?? '').toString(),
+        points: (json['points'] as num?)?.toInt() ?? 0,
       );
 }
 
