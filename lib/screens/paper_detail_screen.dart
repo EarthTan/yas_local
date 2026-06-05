@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/task_provider.dart';
+import '../widgets/rich_content.dart';
 
 class PaperDetailScreen extends ConsumerWidget {
   final String submissionId;
@@ -38,7 +39,7 @@ class PaperDetailScreen extends ConsumerWidget {
                     Text(_emoji(item.trafficLight)),
                   ]),
                   const SizedBox(height: 4),
-                  Text('学生作答：${item.extractedAnswer ?? "（未识别）"}'),
+                  RichContent('学生作答：${item.extractedAnswer ?? "（未识别）"}'),
                   if (item.checkpoints.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     const Divider(height: 1),
@@ -55,11 +56,26 @@ class PaperDetailScreen extends ConsumerWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text('${cp.description}（${cp.pointsAwarded}分）',
-                                  style: const TextStyle(fontSize: 13)),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: RichContent(
+                                      cp.description,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                  Text(
+                                    '（${cp.pointsAwarded}分）',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ],
+                              ),
                               if (cp.reason.isNotEmpty)
-                                Text(cp.reason,
-                                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                RichContent(
+                                  cp.reason,
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                ),
                             ]),
                           ),
                         ]),
@@ -68,8 +84,9 @@ class PaperDetailScreen extends ConsumerWidget {
                   ],
                   if (item.aiComment != null && item.aiComment!.isNotEmpty)
                     Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text('AI 评语：${item.aiComment}')),
+                      padding: const EdgeInsets.only(top: 4),
+                      child: RichContent('AI 评语：${item.aiComment!}'),
+                    ),
                   Row(children: [
                     Text('AI 分：${item.aiScore ?? "-"}'),
                     const Spacer(),
