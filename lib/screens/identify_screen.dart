@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../models/identified_question.dart';
 import '../models/rubric.dart';
 import '../providers/identification_provider.dart';
+import '../providers/job_queue_provider.dart';
 import '../providers/task_provider.dart';
 import '../widgets/debug_entry_button.dart';
 
@@ -91,7 +92,10 @@ class _S extends ConsumerState<IdentifyScreen> {
     }).toList();
 
     await ref.read(taskProvider.notifier).updateTaskRubric(widget.taskId, rubric);
-    if (mounted) context.pushReplacement('/tasks/${widget.taskId}/strategy');
+    if (!mounted) return;
+    // After updateTaskRubric — startStrategy early-returns when rubric is empty.
+    ref.read(jobQueueProvider.notifier).startStrategy(widget.taskId);
+    context.pop();
   }
 
   @override
@@ -160,7 +164,7 @@ class _S extends ConsumerState<IdentifyScreen> {
           const DebugEntryButton(),
           TextButton(
             onPressed: _editables.isNotEmpty ? _confirm : null,
-            child: const Text('确认并生成策略'),
+            child: const Text('确定'),
           ),
         ],
       ),
