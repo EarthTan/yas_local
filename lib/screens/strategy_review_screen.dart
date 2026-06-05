@@ -45,6 +45,12 @@ class StrategyReviewScreen extends ConsumerStatefulWidget {
 class _S extends ConsumerState<StrategyReviewScreen> {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
+  // Guard against double-tap on the rerun-failed-questions button: between
+  // the (currently synchronous) failedNums computation and startStrategy
+  // flipping the job to running, a second tap could re-enter the function
+  // and start a second batch. While _rerunInProgress is true the button's
+  // onPressed is null and Flutter shows a disabled visual state.
+  bool _rerunInProgress = false;
   // Diagnostic listener: ref.listen can only run inside build, so we use
   // ref.listenManual in initState and close the subscription in dispose.
   // It logs refs.length transitions so we can detect a future regression
@@ -275,7 +281,9 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                           ),
                         ),
                         TextButton(
-                          onPressed: () => _rerunFailedStrategyQuestions(),
+                          onPressed: _rerunInProgress
+                              ? null
+                              : () => _rerunFailedStrategyQuestions(),
                           child: const Text('重跑失败题'),
                         ),
                       ],
@@ -438,14 +446,20 @@ class _S extends ConsumerState<StrategyReviewScreen> {
   }
 
   void _rerunFailedStrategyQuestions() async {
-    final refs = ref.read(strategyProvider).references;
-    final failedNums = refs
-        .where((r) => r.checkpoints.isEmpty)
-        .map((r) => r.questionNumber)
-        .toList();
-    if (failedNums.isEmpty) return;
-    await ref
-        .read(jobQueueProvider.notifier)
-        .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
+    try {
+      final refs = ref.read(strategyProvider).references;
+      final failedNums = refs
+          .where((r) => r.checkpoints.isEmpty)
+          .map((r) => r.questionNumber)
+          .toList();
+      if (failedNums.isEmpty) return;
+      await ref
+          .read(jobQueueProvider.notifier)
+          .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    } finally {
+      if (mounted) setState(() => _rerunInProgress = false);
+    }
   }
 }

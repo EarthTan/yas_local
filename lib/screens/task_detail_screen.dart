@@ -37,6 +37,11 @@ class TaskDetailScreen extends ConsumerStatefulWidget {
 class _S extends ConsumerState<TaskDetailScreen> {
   List<ReferenceAnswer>? _cachedRefs; // null = not loaded yet
   bool _loadingRefs = true;
+  // Guard against double-tap on the rerun-failed buttons: between the
+  // "reset failed -> pending" await chain and startGrading/startStrategy
+  // flipping the job to running, a second tap could re-enter the function
+  // and run the chain twice.
+  bool _rerunInProgress = false;
 
   @override
   void initState() {
@@ -269,7 +274,8 @@ class _S extends ConsumerState<TaskDetailScreen> {
                       ),
                     ),
                     OutlinedButton(
-                      onPressed: () => _rerunFailedStrategy(),
+                      onPressed:
+                          _rerunInProgress ? null : () => _rerunFailedStrategy(),
                       child: const Text('重跑失败题'),
                     ),
                   ],
@@ -356,7 +362,8 @@ class _S extends ConsumerState<TaskDetailScreen> {
                           ),
                         ),
                         OutlinedButton(
-                          onPressed: () => _rerunFailedGrading(),
+                          onPressed:
+                              _rerunInProgress ? null : () => _rerunFailedGrading(),
                           child: const Text('重跑失败项'),
                         ),
                       ],
@@ -453,27 +460,39 @@ class _S extends ConsumerState<TaskDetailScreen> {
   }
 
   void _rerunFailedGrading() async {
-    // Reset only the failed submissions to pending; submissions already done
-    // stay done. startGrading's existing filter (status != done) takes care
-    // of the rest.
-    final subs = ref.read(taskProvider.notifier).submissionsFor(widget.taskId);
-    for (final s in subs.where((s) => s.status == SubmissionStatus.failed)) {
-      await ref.read(taskProvider.notifier).updateSubmission(
-            s.copyWith(status: SubmissionStatus.pending, items: []),
-          );
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
+    try {
+      // Reset only the failed submissions to pending; submissions already done
+      // stay done. startGrading's existing filter (status != done) takes care
+      // of the rest.
+      final subs = ref.read(taskProvider.notifier).submissionsFor(widget.taskId);
+      for (final s in subs.where((s) => s.status == SubmissionStatus.failed)) {
+        await ref.read(taskProvider.notifier).updateSubmission(
+              s.copyWith(status: SubmissionStatus.pending, items: []),
+            );
+      }
+      await ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
+    } finally {
+      if (mounted) setState(() => _rerunInProgress = false);
     }
-    await ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
   }
 
   void _rerunFailedStrategy() async {
-    final refs = _cachedRefs ?? await ReferenceStore.load(widget.taskId);
-    final failedNums = refs
-        .where((r) => r.checkpoints.isEmpty)
-        .map((r) => r.questionNumber)
-        .toList();
-    if (failedNums.isEmpty) return;
-    await ref
-        .read(jobQueueProvider.notifier)
-        .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
+    try {
+      final refs = _cachedRefs ?? await ReferenceStore.load(widget.taskId);
+      final failedNums = refs
+          .where((r) => r.checkpoints.isEmpty)
+          .map((r) => r.questionNumber)
+          .toList();
+      if (failedNums.isEmpty) return;
+      await ref
+          .read(jobQueueProvider.notifier)
+          .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    } finally {
+      if (mounted) setState(() => _rerunInProgress = false);
+    }
   }
 }
