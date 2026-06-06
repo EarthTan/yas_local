@@ -110,7 +110,7 @@ class CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
     await ref.read(taskProvider.notifier).replaceSubmissions(widget.taskId, subs);
     if (!mounted) return;
-    context.pushReplacement('/tasks/${widget.taskId}');
+    context.go('/tasks/${widget.taskId}');
   }
 
   @override
