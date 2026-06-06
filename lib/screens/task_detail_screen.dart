@@ -433,15 +433,6 @@ class _S extends ConsumerState<TaskDetailScreen> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('取消'),
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('旧批改结果保留。可随时点击「重新批改」重新批改。')),
-              );
-            },
-            child: const Text('保留旧结果'),
-          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
             onPressed: _rerunInProgress ? null : () => _rerunAllGrading(ctx),

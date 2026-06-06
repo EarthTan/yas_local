@@ -196,7 +196,8 @@ void main() {
       expect(find.text('重新批改将使用当前批改策略覆盖已有的批改结果。'),
           findsOneWidget);
       expect(find.text('取消'), findsOneWidget);
-      expect(find.text('保留旧结果'), findsOneWidget);
+      expect(find.text('保留旧结果'), findsNothing,
+          reason: 'regrade dialog has only "取消" + "立即重批" (U-12)');
       expect(find.text('立即重批'), findsOneWidget);
 
       // The "立即重批" button must be enabled (no rerun in progress).
