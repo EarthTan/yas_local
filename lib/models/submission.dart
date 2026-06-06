@@ -30,7 +30,11 @@ class GradedItem {
     return 'red';
   }
 
-  GradedItem copyWith({int? teacherScore}) => GradedItem(
+  GradedItem copyWith({
+    int? teacherScore,
+    bool clearTeacherScore = false,
+  }) =>
+      GradedItem(
         questionNumber: questionNumber,
         type: type,
         extractedAnswer: extractedAnswer,
@@ -38,7 +42,7 @@ class GradedItem {
         aiScore: aiScore,
         aiComment: aiComment,
         confidence: confidence,
-        teacherScore: teacherScore ?? this.teacherScore,
+        teacherScore: clearTeacherScore ? null : (teacherScore ?? this.teacherScore),
       );
 
   Map<String, dynamic> toJson() => {
