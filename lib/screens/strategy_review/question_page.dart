@@ -209,25 +209,9 @@ class QuestionPage extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           ...r.checkpoints.map(
-            (c) => InkWell(
+            (c) => _CheckpointRow(
+              checkpoint: c,
               onTap: () => onEditCheckpoint(c.id, c),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                margin: const EdgeInsets.only(bottom: 4),
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Expanded(child: RichContent(c.description)),
-                    const SizedBox(width: 8),
-                    Text('${c.points}分',
-                        style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -259,6 +243,57 @@ class QuestionPage extends StatelessWidget {
               ],
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Tappable row for a single checkpoint. Adds a leading chevron and a hover
+/// background so the row reads as interactive even before the InkWell ripple
+/// fires (fixes U-16: mouse users had no way to know the row was tappable).
+class _CheckpointRow extends StatefulWidget {
+  final CheckpointDef checkpoint;
+  final VoidCallback onTap;
+
+  const _CheckpointRow({required this.checkpoint, required this.onTap});
+
+  @override
+  State<_CheckpointRow> createState() => _CheckpointRowState();
+}
+
+class _CheckpointRowState extends State<_CheckpointRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.checkpoint;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered ? Colors.grey.shade100 : Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                Expanded(child: RichContent(c.description)),
+                const SizedBox(width: 8),
+                Text('${c.points}分',
+                    style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, size: 18, color: Colors.black54),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
