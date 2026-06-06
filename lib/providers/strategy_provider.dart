@@ -313,6 +313,12 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
   /// Saves all references (confirmed or not) to disk for Phase 2 to use.
   Future<void> saveAllConfirmed(String taskId) async {
+    // Cancel any pending debounced save so the immediate write below is
+    // the only one (otherwise the debounce timer would fire later and
+    // rewrite the same state — wasteful, not a correctness bug).
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    _saveTaskId = null;
     await ReferenceStore.save(taskId, state.references);
   }
 

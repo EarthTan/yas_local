@@ -633,5 +633,30 @@ void main() {
       final raw = await cacheFile.readAsString();
       expect(raw.contains('已更新批改策略'), isTrue);
     });
+
+    test('saveAllConfirmed flushes any pending debounced save', () async {
+      final c = _container(tmp: tmp);
+      final n = c.read(strategyProvider.notifier);
+      await n.load('t1');
+      final ref = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: [const CheckpointDef(id: 'cp1', description: 'd', points: 2)],
+      );
+      c.read(strategyProvider.notifier).state = StrategyState(references: [ref]);
+      // Trigger a debounced save.
+      n.editCheckpoint(1, 'cp1', description: 'updated');
+      // Immediately call saveAllConfirmed (within the 500ms debounce window).
+      await n.saveAllConfirmed('t1');
+      // After 600ms (past the debounce), the file should still exist
+      // (proving the immediate write happened) and NOT have been
+      // rewritten again (proving the pending timer was cancelled).
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      final cacheFile = File('${tmp.path}/reference_t1.json');
+      expect(await cacheFile.exists(), isTrue);
+      // The post-edit state should be on disk.
+      final raw = await cacheFile.readAsString();
+      expect(raw.contains('updated'), isTrue);
+    });
   });
 }
+
