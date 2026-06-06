@@ -46,7 +46,7 @@ void main() {
       ));
     }
     // Build a state with 6 submissions per task, distributed round-robin.
-    // setSubmissions REPLACES the list per task, so we accumulate the
+    // replaceSubmissions REPLACES the list per task, so we accumulate the
     // per-task list locally and write the final list in one shot.
     final perTask = <String, List<Submission>>{
       for (var i = 0; i < 5; i++) 't$i': <Submission>[],
@@ -56,7 +56,7 @@ void main() {
           .add(Submission(id: 's$i', taskId: 't${i % 5}', label: '$i'));
     }
     for (var i = 0; i < 5; i++) {
-      await n.setSubmissions('t$i', perTask['t$i']!);
+      await n.replaceSubmissions('t$i', perTask['t$i']!);
     }
 
     final state = container.read(taskProvider);

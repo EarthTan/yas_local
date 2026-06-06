@@ -440,13 +440,29 @@ class QwenService {
           final qNum = q['number'] is int
               ? q['number'] as int
               : int.tryParse(q['number'].toString()) ?? 0;
+          // Clamp per-checkpoint pointsAwarded to [0, maxPoints] using the
+          // matching rubric's maxPoints as the cap. S-4 fix.
+          final maxPtsForQ = rubric
+              .firstWhere(
+                (r) => r.questionNumber == qNum,
+                orElse: () => const RubricItem(
+                  questionNumber: 0,
+                  type: 'subjective',
+                  maxPoints: 0,
+                ),
+              )
+              .maxPoints;
           final cps = (q['checkpoints'] as List? ?? [])
-              .map((c) => CheckpointResult(
-                    description: (c['description'] ?? '').toString(),
-                    passed: c['passed'] as bool? ?? false,
-                    pointsAwarded: (c['points_awarded'] as num?)?.toInt() ?? 0,
-                    reason: (c['reason'] ?? '').toString(),
-                  ))
+              .map((c) {
+                final raw = (c['points_awarded'] as num?)?.toInt() ?? 0;
+                final clamped = raw.clamp(0, maxPtsForQ);
+                return CheckpointResult(
+                  description: (c['description'] ?? '').toString(),
+                  passed: c['passed'] as bool? ?? false,
+                  pointsAwarded: clamped,
+                  reason: (c['reason'] ?? '').toString(),
+                );
+              })
               .toList();
           return QuestionGradeResult(
             questionNumber: qNum,

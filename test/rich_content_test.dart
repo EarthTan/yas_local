@@ -69,13 +69,16 @@ void main() {
       expect(find.byType(MarkdownBody), findsOneWidget);
     });
 
-    testWidgets('HTML 下划线 <u> 不崩溃', (tester) async {
+    testWidgets('HTML 下划线 <u> 被消费（不以字面标签渲染）', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
             home: Scaffold(body: RichContent('<u>下划线文本</u>'))),
       );
       await tester.pump();
       expect(find.byType(MarkdownBody), findsOneWidget);
+      // _HtmlUnderlineSyntax consumes <u>...</u> and emits an 'underline'
+      // element — the raw tag characters must NOT appear as literal text.
+      expect(find.text('<u>下划线文本</u>'), findsNothing);
     });
 
     testWidgets('行内 LaTeX 不崩溃', (tester) async {

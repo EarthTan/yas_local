@@ -47,7 +47,7 @@ void main() {
       answerImagePaths: const [],
     ));
     // Item's checkpoints sum to 8 (5 + 3), no rubric entry for Q5.
-    await notifier.setSubmissions('t1', [
+    await notifier.replaceSubmissions('t1', [
       Submission(
         id: 's1',
         taskId: 't1',

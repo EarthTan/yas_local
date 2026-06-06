@@ -73,7 +73,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
     return null;
   }
 
-  Future<void> setSubmissions(String taskId, List<Submission> subs) async {
+  Future<void> replaceSubmissions(String taskId, List<Submission> subs) async {
     final others = state.submissions.where((s) => s.taskId != taskId).toList();
     state = state.copyWith(submissions: [...others, ...subs]);
     await _persist();
@@ -124,6 +124,14 @@ class TaskNotifier extends StateNotifier<TaskState> {
     );
     await _persist();
     _refreshDebugSnapshot();
+  }
+
+  /// Cancel any pending _persist and run it now. Used by the lifecycle
+  /// observer on app pause.
+  Future<void> flushPersist() {
+    // _persist already coalesces; awaiting it ensures the latest state
+    // is on disk before the OS may kill us.
+    return _persist();
   }
 
   void _refreshDebugSnapshot() {

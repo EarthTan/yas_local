@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
@@ -10,7 +9,6 @@ import 'package:markdown/markdown.dart' as md;
 ///
 /// Block pass runs before inline to prevent $$$$...$$$$ being split
 /// by the inline rule (since $$$$ starts with $$).
-@visibleForTesting
 String normalizeLatexDelimiters(String text) {
   if (text.isEmpty) return text;
 
@@ -74,6 +72,40 @@ class _LatexDisplaySyntax extends md.BlockSyntax {
     // No closing \] — emit consumed lines as a plain paragraph to avoid
     // silently dropping document content (e.g. malformed LLM output).
     return md.Element('p', [md.Text(lines.join('\n'))]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HTML underline syntax: converts <u>...</u> to an 'underline' element so
+// flutter_markdown renders it with TextDecoration.underline rather than
+// emitting the raw tag characters as literal text.
+// (flutter_markdown 0.7.x has no enableHtml parameter on MarkdownBody.)
+// ---------------------------------------------------------------------------
+class _HtmlUnderlineSyntax extends md.InlineSyntax {
+  // startCharacter: 0x3C ('<') skips the regex on non-'<' characters (perf).
+  // MUST be placed before InlineHtmlSyntax in the syntax list so the full
+  // <u>...</u> is consumed before InlineHtmlSyntax can grab '<u>' as raw text.
+  _HtmlUnderlineSyntax() : super(r'<u>(.*?)</u>', startCharacter: 0x3C);
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text('underline', match[1]!));
+    return true;
+  }
+}
+
+class _UnderlineBuilder extends MarkdownElementBuilder {
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final style = (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
+      decoration: TextDecoration.underline,
+    );
+    return Text.rich(TextSpan(text: element.textContent, style: style));
   }
 }
 
@@ -160,6 +192,7 @@ class _InlineMathBuilder extends MarkdownElementBuilder {
 // Module-level constants — created once, shared across all RichContent builds.
 final _blockMathBuilder = _BlockMathBuilder();
 final _inlineMathBuilder = _InlineMathBuilder();
+final _underlineBuilder = _UnderlineBuilder();
 
 final _mathExtensionSet = md.ExtensionSet(
   [
@@ -167,6 +200,10 @@ final _mathExtensionSet = md.ExtensionSet(
     _LatexDisplaySyntax(),
   ],
   [
+    // _HtmlUnderlineSyntax must come FIRST — before InlineHtmlSyntax (from
+    // gitHubFlavored) so it matches full <u>...</u> before InlineHtmlSyntax
+    // can grab the opening '<u>' tag as a raw text node.
+    _HtmlUnderlineSyntax(),
     ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
     _LatexInlineSyntax(),
   ],
@@ -210,6 +247,7 @@ class RichContent extends StatelessWidget {
       builders: {
         'latex-block': _blockMathBuilder,
         'latex-inline': _inlineMathBuilder,
+        'underline': _underlineBuilder,
       },
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: baseStyle,

@@ -40,7 +40,7 @@ void main() {
       for (var i = 0; i < 8; i++)
         Submission(id: 's$i', taskId: 't1', label: 'p$i'),
     ];
-    await notifier.setSubmissions('t1', subs);
+    await notifier.replaceSubmissions('t1', subs);
 
     // Fire all updates concurrently, then await them together.
     await Future.wait([

@@ -9,6 +9,7 @@ enum QwenErrorKind {
   timeout,
   http4xx,
   http5xx,
+  badResponse,
   jsonParse,
   unknown;
 
@@ -18,12 +19,16 @@ enum QwenErrorKind {
         QwenErrorKind.timeout => '请求超时',
         QwenErrorKind.http4xx => '接口拒绝 (4xx)',
         QwenErrorKind.http5xx => '服务异常 (5xx)',
+        QwenErrorKind.badResponse => '服务异常 (5xx)',
         QwenErrorKind.jsonParse => 'JSON 解析错',
         QwenErrorKind.unknown => '未知错误',
       };
 
-  /// 4xx is a configuration / auth problem, never worth auto-retrying.
-  bool get shouldRetry => this != QwenErrorKind.http4xx;
+  /// 4xx and badResponse are non-retryable: 4xx is a configuration / auth
+  /// problem; badResponse means the server gave us a malformed/empty body
+  /// and retrying won't help.
+  bool get shouldRetry =>
+      this != QwenErrorKind.http4xx && this != QwenErrorKind.badResponse;
 }
 
 class QwenError implements Exception {
@@ -56,9 +61,10 @@ class QwenError implements Exception {
           return QwenError(QwenErrorKind.timeout, e);
         case DioExceptionType.connectionError:
           return QwenError(QwenErrorKind.network, e);
+        case DioExceptionType.badResponse:
+          return QwenError(QwenErrorKind.badResponse, e);
         case DioExceptionType.badCertificate:
         case DioExceptionType.cancel:
-        case DioExceptionType.badResponse:
         case DioExceptionType.unknown:
           return QwenError(QwenErrorKind.unknown, e);
       }

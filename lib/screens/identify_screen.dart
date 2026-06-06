@@ -60,6 +60,11 @@ class _S extends ConsumerState<IdentifyScreen> {
 
   void _initEditables(List<IdentifiedQuestion> questions) {
     _initialized = true;
+    // Dispose existing controllers before discarding the list. Without
+    // this, every retry leaks 3 TextEditingControllers per question.
+    for (final e in _editables) {
+      e.dispose();
+    }
     _editables.clear();
     _editables.addAll(questions.map((q) => _EditableQuestion(
           questionNumber: q.number,

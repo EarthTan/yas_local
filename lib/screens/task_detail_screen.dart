@@ -436,6 +436,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
   );
 
   void _showRegradeDialog() {
+    if (_rerunInProgress) return;
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -448,7 +449,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
-            onPressed: _rerunInProgress ? null : () => _rerunAllGrading(ctx),
+            onPressed: () => _rerunAllGrading(ctx),
             child: const Text('立即重批'),
           ),
         ],
