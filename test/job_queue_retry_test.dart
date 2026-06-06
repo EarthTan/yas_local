@@ -203,9 +203,9 @@ void main() {
           reason: 'inner helper should have done 3 attempts');
       expect(
         maxAttempt,
-        greaterThanOrEqualTo(2),
+        equals(3),
         reason:
-            'JobState.attempt should reflect inner helper progress (>=2 means '
+            'JobState.attempt should reflect inner helper progress (==3 means '
             'attempt count was actually threaded, not hardcoded at 1)',
       );
     },
