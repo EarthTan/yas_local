@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/models/reference_answer.dart';
+import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/settings.dart';
 import 'package:yas_local/services/qwen_error.dart';
 import 'package:yas_local/services/qwen_service.dart';
@@ -125,4 +128,74 @@ void main() {
     expect(elapsed, greaterThanOrEqualTo(2000),
         reason: 'backoff must actually sleep between attempts');
   });
+
+  test(
+    'refineStrategy: DioException on attempt 1 is retried (not propagated)',
+    () async {
+      final s = const AppSettings(
+        apiKey: 'k',
+        baseUrl: 'https://example.test/v1',
+      );
+      final svc = QwenService(s);
+      final adapter = _RefineRetryAdapter();
+      svc.dio.httpClientAdapter = adapter;
+
+      final rubric = const RubricItem(
+        questionNumber: 1,
+        type: 'subjective',
+        maxPoints: 5,
+      );
+      final current = ReferenceAnswer(
+        questionNumber: 1,
+        checkpoints: const [],
+      );
+
+      // Should not throw — the DioException on attempt 1 should be caught
+      // and the request retried; the 2nd attempt returns a parseable body.
+      await svc.refineStrategy(
+        rubric: rubric,
+        current: current,
+        chatHistory: const [],
+        userMessage: '把第 2 步拆细一点',
+      );
+
+      expect(adapter.calls, 2,
+          reason: 'transport error must trigger a retry, not propagate');
+    },
+  );
+}
+
+/// Adapter that ignores request body and either throws a DioException
+/// (transport) on every call or returns a valid response. Used to drive
+/// refineStrategy's retry-on-transport path.
+class _RefineRetryAdapter implements HttpClientAdapter {
+  _RefineRetryAdapter();
+
+  int calls = 0;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    calls++;
+    if (calls == 1) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionTimeout,
+      );
+    }
+    // Minimal valid response: a checkpoints array of one item, points sum
+    // matches maxPoints (5). This satisfies _parseReferenceAnswer and
+    // JsonExtractor.requireObjectWithReasoning.
+    return ResponseBody.fromString(
+      '{"choices":[{"message":{"content":"{\\"checkpoints\\":[{\\"description\\":\\"x\\",\\"points\\":5}]}"}}]}',
+      200,
+      headers: {'content-type': ['application/json']},
+    );
+  }
 }

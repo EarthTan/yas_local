@@ -259,6 +259,12 @@ class QwenService {
     // re-send with the new user turn appended with jsonRetryNudge. We don't
     // go through _retryingRequest because the multi-turn message structure
     // doesn't match its bodyBuilder contract.
+    //
+    // We also catch DioException so transport errors (timeout, 5xx, network)
+    // retry just like _retryingRequest would. This matches the rest of the
+    // service's retry contract — a chat retry must not be strictly less
+    // resilient than a grade/strategy call. Non-retryable kinds (4xx) are
+    // rethrown immediately; retryable kinds go through _backoffMs(attempt).
     for (var attempt = 0; attempt < 2; attempt++) {
       final messages = attempt == 0
           ? baseMessages
@@ -269,35 +275,45 @@ class QwenService {
                 'content': userMessage + AppPrompts.jsonRetryNudge,
               },
             ];
-      final resp = await _dio.post(
-        '/chat/completions',
-        data: {
-          'model': settings.vlModel,
-          'messages': messages,
-        },
-        options: Options(extra: {'_qwen_scope': 'refine'}),
-      );
-      final content = resp.data['choices'][0]['message']['content'] as String;
       try {
-        final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
-        return _parseReferenceAnswer(
-          current.questionNumber,
-          payload.json,
-          reasoning: payload.reasoning,
+        final resp = await _dio.post(
+          '/chat/completions',
+          data: {
+            'model': settings.vlModel,
+            'messages': messages,
+          },
+          options: Options(extra: {'_qwen_scope': 'refine'}),
         );
-      } on JsonParseException catch (e) {
-        DebugService.instance.recordQwenCall(QwenCallRecord(
-          timestamp: DateTime.now(),
-          scope: 'refine',
-          model: settings.vlModel,
-          endpoint: '/chat/completions',
-          statusCode: resp.statusCode,
-          elapsedMs: 0,
-          status: QwenCallStatus.parseError,
-          messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
-          errorMessage: e.toString(),
-        ));
-        if (attempt == 1) rethrow;
+        final content = resp.data['choices'][0]['message']['content'] as String;
+        try {
+          final payload = JsonExtractor.requireObjectWithReasoning(content, scope: 'refine');
+          return _parseReferenceAnswer(
+            current.questionNumber,
+            payload.json,
+            reasoning: payload.reasoning,
+          );
+        } on JsonParseException catch (e) {
+          DebugService.instance.recordQwenCall(QwenCallRecord(
+            timestamp: DateTime.now(),
+            scope: 'refine',
+            model: settings.vlModel,
+            endpoint: '/chat/completions',
+            statusCode: resp.statusCode,
+            elapsedMs: 0,
+            status: QwenCallStatus.parseError,
+            messages: redactBase64Messages(messages), // one-shot chat, useful to see what we sent
+            errorMessage: e.toString(),
+          ));
+          if (attempt == 1) rethrow;
+        }
+      } on DioException catch (e) {
+        final q = QwenError.from(e);
+        // 4xx is a hard stop (config / auth problem). Honor shouldRetry so
+        // the behavior matches _retryingRequest for retryable kinds.
+        if (!q.shouldRetry) throw q;
+        if (attempt == 1) throw q;
+        final delay = _backoffMs(attempt);
+        await Future<void>.delayed(Duration(milliseconds: delay));
       }
     }
     // Unreachable: the loop either returns or rethrows.
