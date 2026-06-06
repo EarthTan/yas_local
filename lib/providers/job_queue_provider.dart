@@ -191,7 +191,7 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
             sub.copyWith(status: SubmissionStatus.processing),
           );
 
-          final grades = await _retryWithFeedback<List<QuestionGradeResult>>(
+          final List<QuestionGradeResult> grades = await _retryWithFeedback<List<QuestionGradeResult>>(
             taskId: taskId,
             unitLabel: '第 ${subIndexOf(targets, sub) + 1} 例',
             action: (onAttempt) => qwen.gradePaper(
