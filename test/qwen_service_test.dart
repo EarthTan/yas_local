@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yas_local/models/rubric.dart';
 import 'package:yas_local/models/settings.dart';
 import 'package:yas_local/services/debug/debug_service.dart';
 import 'package:yas_local/services/qwen_error.dart';
@@ -259,4 +261,64 @@ void main() {
       expect((out[0]['content'] as List).single['type'], 'text');
     });
   });
+
+  group('gradePaper pointsAwarded clamp (S-4)', () {
+    test('clamps negative and over-max pointsAwarded to rubric.maxPoints', () async {
+      // Stub HTTP adapter that returns a 200 OK with a payload that has
+      // -5 and 999 in points_awarded. The rubric caps the question at 5.
+      // The clamp should pull -5 → 0 and 999 → 5.
+      final okBody = jsonEncode({
+        'choices': [
+          {
+            'message': {
+              'role': 'assistant',
+              'content': jsonEncode({
+                'questions': [
+                  {
+                    'number': 1,
+                    'extracted_answer': 'x',
+                    'checkpoints': [
+                      {'description': 'a', 'points_awarded': -5, 'reason': 'r', 'passed': false},
+                      {'description': 'b', 'points_awarded': 999, 'reason': 'r', 'passed': true},
+                    ],
+                    'confidence': 0.9,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+      final s = const AppSettings(apiKey: 'k', baseUrl: 'https://example.test/v1');
+      final q = QwenService(s);
+      q.dio.httpClientAdapter = _OkJsonAdapter(okBody);
+      final rubric = [RubricItem(questionNumber: 1, type: 'subjective', maxPoints: 5)];
+      final out = await q.gradePaper(
+        imagePath: '/dev/null',
+        questionPaperPaths: const [],
+        rubric: rubric,
+        refs: const [],
+      );
+      expect(out.first.checkpoints[0].pointsAwarded, 0,
+          reason: 'negative pointsAwarded clamped to 0');
+      expect(out.first.checkpoints[1].pointsAwarded, 5,
+          reason: 'over-max pointsAwarded clamped to rubric.maxPoints');
+    });
+  });
+}
+
+class _OkJsonAdapter implements HttpClientAdapter {
+  _OkJsonAdapter(this.body);
+  final String body;
+  @override
+  void close({bool force = false}) {}
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<List<int>>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    return ResponseBody.fromString(body, 200,
+        headers: {'content-type': ['application/json']});
+  }
 }

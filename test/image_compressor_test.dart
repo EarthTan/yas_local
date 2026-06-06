@@ -219,4 +219,27 @@ void main() {
       expect(File(second).existsSync(), isTrue);
     });
   });
+
+  group('ImageCompressor.compressedPathFor — _inflight cleanup', () {
+    late Directory tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('yas_imgcomp_inflight_');
+    });
+
+    tearDown(() {
+      if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
+    });
+
+    test('compressedPathFor cleans up _inflight on completion', () async {
+      // Drive a real srcPath through the public API. Use a non-existent path so
+      // _doCompress returns early (srcPath unchanged) and the future completes
+      // synchronously. Then verify _inflight is empty.
+      final src = '${tmpDir.path}/nonexistent_${DateTime.now().microsecondsSinceEpoch}.jpg';
+      final result = await ImageCompressor.compressedPathFor(src);
+      expect(result, src); // fallback to original
+      expect(ImageCompressor.inflightSizeForTest, 0,
+          reason: '_inflight must be cleaned up after future completes');
+    });
+  });
 }

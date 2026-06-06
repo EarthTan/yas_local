@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/checkpoint.dart';
 import '../models/reference_answer.dart';
@@ -53,6 +55,40 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   final Ref ref;
   final QwenService Function(Ref ref)? _qwenFactory;
 
+  /// Currently-loaded task id. Set by [load]. Used by [_scheduleSave] to know
+  /// which `reference_<taskId>.json` to write to when a mutator fires.
+  String? _saveTaskId;
+
+  /// Pending debounced save. Cancelled and rescheduled on each mutation so a
+  /// burst of edits only writes once, 500ms after the last one.
+  Timer? _saveDebounce;
+
+  /// Generation counter for in-flight async work. Bumped in [dispose] so any
+  /// `await`ed work that resolves after dispose can detect it's stale and
+  /// bail before writing to a dead notifier (see bbbbbiiiigBugs.md#S-9).
+  int _token = 0;
+
+  @override
+  void dispose() {
+    _token++;
+    _saveDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleSave(String taskId) {
+    _saveDebounce?.cancel();
+    _saveTaskId = taskId;
+    _saveDebounce = Timer(const Duration(milliseconds: 500), () {
+      _saveDebounce = null;
+      final id = _saveTaskId;
+      if (id == null) return;
+      _saveTaskId = null;
+      // Fire-and-forget; notifier lives for the app's lifetime so this
+      // cannot race with dispose.
+      ReferenceStore.save(id, state.references);
+    });
+  }
+
   QwenService _newQwen() {
     final factory = _qwenFactory;
     return factory != null
@@ -63,13 +99,27 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
   /// Loads cached references from disk into state (no generation — bulk
   /// generation is owned by JobQueueNotifier.startStrategy).
   Future<void> load(String taskId) async {
+    _saveTaskId = taskId;
     final cached = await ReferenceStore.load(taskId);
     state = state.copyWith(references: cached);
+  }
+
+  /// Cancel any pending debounced save and persist immediately. Used by
+  /// the app-lifecycle observer on `paused` / `detached` so the 500ms
+  /// debounce window cannot drop data when the app is backgrounded.
+  void flushPendingSave() {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    final id = _saveTaskId;
+    _saveTaskId = null;
+    if (id == null) return;
+    ReferenceStore.save(id, state.references);
   }
 
   /// Retry generation for a single question — replaces the cached
   /// reference for that questionNumber with a fresh one from the VLM.
   Future<void> retryGenerate(String taskId, int questionNumber) async {
+    final myToken = _token;
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) {
       state = state.copyWith(error: '未配置 API Key，请先到设置填写');
@@ -97,6 +147,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         answerImagePaths: task.answerImagePaths,
         totalQuestions: task.rubric.length,
       );
+      if (myToken != _token) return; // disposed mid-flight
       final newRefs = [
         for (final r in state.references)
           if (r.questionNumber == questionNumber) updated else r,
@@ -123,6 +174,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         message: 'retryGenerate 完成',
       );
     } catch (e) {
+      if (myToken != _token) return; // disposed mid-flight
       state = state.copyWith(
         refining: false,
         refiningQuestion: null,
@@ -143,6 +195,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     int questionNum,
     String message,
   ) async {
+    final myToken = _token;
     final settings = ref.read(settingsProvider);
     if (!settings.isConfigured) return;
 
@@ -177,13 +230,15 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
     ];
 
     try {
-      final qwen = QwenService(settings);
+      final qwen = _newQwen();
       final updated = await qwen.refineStrategy(
         rubric: rubricItem,
         current: current,
         chatHistory: current.chatHistory,
         userMessage: message,
       );
+
+      if (myToken != _token) return; // disposed mid-flight
 
       final aiReply = updated.checkpoints
           .map((c) => '• ${c.description}（${c.points}分）')
@@ -211,6 +266,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         message: 'refine 完成',
       );
     } catch (e) {
+      if (myToken != _token) return; // disposed mid-flight
       // On error, still record the user message in history
       final newRef = current.copyWith(
         chatHistory: [
@@ -232,14 +288,18 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         data: {'error': e.toString()},
       );
     }
+    if (myToken != _token) return; // disposed mid-flight
+    _scheduleSave(taskId);
   }
 
   void confirmQuestion(int questionNum) {
     _updateRef(questionNum, (r) => r.copyWith(confirmed: true));
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void unconfirmQuestion(int questionNum) {
     _updateRef(questionNum, (r) => r.copyWith(confirmed: false));
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void confirmAll() {
@@ -248,10 +308,17 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
           .map((r) => r.copyWith(confirmed: true))
           .toList(),
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   /// Saves all references (confirmed or not) to disk for Phase 2 to use.
   Future<void> saveAllConfirmed(String taskId) async {
+    // Cancel any pending debounced save so the immediate write below is
+    // the only one (otherwise the debounce timer would fire later and
+    // rewrite the same state — wasteful, not a correctness bug).
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    _saveTaskId = null;
     await ReferenceStore.save(taskId, state.references);
   }
 
@@ -296,6 +363,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'editCheckpoint $checkpointId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void addCheckpoint(
@@ -326,6 +394,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'addCheckpoint $newId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 
   void removeCheckpoint(int questionNumber, String checkpointId) {
@@ -346,6 +415,7 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
       scope: 'strategy / q:$questionNumber',
       message: 'removeCheckpoint $checkpointId',
     );
+    _scheduleSave(_saveTaskId ?? 'unknown');
   }
 }
 
@@ -357,6 +427,6 @@ final qwenFactoryProvider = Provider<QwenService Function(Ref ref)?>(
 );
 
 final strategyProvider =
-    StateNotifierProvider.autoDispose<StrategyNotifier, StrategyState>((ref) {
+    StateNotifierProvider<StrategyNotifier, StrategyState>((ref) {
       return StrategyNotifier(ref, qwenFactory: ref.read(qwenFactoryProvider));
     });

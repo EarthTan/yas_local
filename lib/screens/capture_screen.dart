@@ -11,13 +11,26 @@ class CaptureScreen extends ConsumerStatefulWidget {
   final String taskId;
   const CaptureScreen({super.key, required this.taskId});
   @override
-  ConsumerState<CaptureScreen> createState() => _S();
+  CaptureScreenState createState() => CaptureScreenState();
 }
 
-class _S extends ConsumerState<CaptureScreen> {
+class CaptureScreenState extends ConsumerState<CaptureScreen> {
   final _picker = ImagePicker();
   final List<File> _photos = [];
   bool _busy = false;
+
+  /// Test-only seam: stage photos in [_photos] without going through
+  /// [ImagePicker]. Used by widget tests that drive the confirm-dialog
+  /// flow without a real photo library. Wraps in [setState] so the
+  /// "下一步" AppBar action appears.
+  @visibleForTesting
+  void debugStagePhotos(List<File> photos) {
+    setState(() {
+      _photos
+        ..clear()
+        ..addAll(photos);
+    });
+  }
 
   Future<void> _shoot() async {
     if (Platform.isMacOS) {
@@ -60,7 +73,27 @@ class _S extends ConsumerState<CaptureScreen> {
       final path = await ImageStore.persist(_photos[i].path, id);
       subs.add(Submission(id: id, taskId: widget.taskId, label: '第 ${i + 1} 份', imagePath: path));
     }
-    await ref.read(taskProvider.notifier).setSubmissions(widget.taskId, subs);
+    final existing =
+        ref.read(taskProvider.notifier).submissionsFor(widget.taskId).length;
+    if (existing > 0) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('确认覆盖'),
+          content: Text('已有 $existing 份作业。再次上传将覆盖之前的全部。是否继续？'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('覆盖')),
+          ],
+        ),
+      );
+      if (ok != true) {
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
+    }
+    await ref.read(taskProvider.notifier).replaceSubmissions(widget.taskId, subs);
     if (!mounted) return;
     context.pushReplacement('/tasks/${widget.taskId}');
   }

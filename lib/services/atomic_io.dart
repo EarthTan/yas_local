@@ -15,6 +15,15 @@ import 'debug/debug_service.dart';
 /// failure renames the file aside (so it isn't lost forever) and emits a
 /// DebugService event. The caller receives a "empty" value they supply
 /// (e.g. `() => const AppSettings()`) and can keep going.
+///
+/// When the parsed JSON is a `List` and the caller-supplied [decode]
+/// throws on the whole list, `readJsonOrQuarantine` re-tries [decode]
+/// per element wrapped in a single-element list (`[item]`). Successful
+/// per-item results are concatenated; failures are isolated. If any
+/// item failed, the original file is quarantined to a per-item broken
+/// name and the surviving raw JSON elements are atomically re-written
+/// to the original path. This keeps one bad record from taking down the
+/// entire file (the C-2 bug in `bbbbbiiiigBugs.md`).
 
 int _quarantineCounter = 0;
 int _pidSalt = 0;
@@ -50,14 +59,24 @@ Future<void> writeJsonAtomic(File target, String content) async {
 
 /// Read [file], JSON-decode it, then pass the parsed value to [decode].
 ///
-/// On any failure (read, JSON parse, or [decode] itself throwing) the
-/// file is quarantined (renamed aside + DebugService event) and [empty]
-/// is returned.
+/// On any failure (read, JSON parse, or [decode] itself throwing on a
+/// non-list parsed value) the file is quarantined (renamed aside +
+/// DebugService event) and [empty] is returned.
+///
+/// **Per-item recovery**: when the parsed JSON is a `List` and [decode]
+/// throws on the whole list, this helper re-tries [decode] per element
+/// (wrapped as `[item]`) and concatenates the successful results.
+/// Failures are isolated: the original file is quarantined to a
+/// per-item broken name and the surviving raw JSON elements are
+/// atomically re-written to the original path. The aggregated result is
+/// returned to the caller. This keeps one bad record from taking down
+/// the whole file.
 ///
 /// On success returns `decode(parsed)`. If the file does not exist,
 /// returns [empty] with no DebugService event (missing file is not an
-/// error). The quarantine rename format is
-/// `<original>.<scope>.broken.<pid>.<micros>.<counter>`.
+/// error). The whole-file quarantine rename format is
+/// `<original>.<scope>.broken.<pid>.<micros>.<counter>`; the per-item
+/// quarantine format is `<original>.broken.<scope>.<micros>.<counter>`.
 Future<T> readJsonOrQuarantine<T>(
   File file,
   T Function(Object? parsed) decode,
@@ -69,7 +88,7 @@ Future<T> readJsonOrQuarantine<T>(
   try {
     raw = await file.readAsString();
   } catch (e) {
-    await _quarantine(
+    await _quarantineWhole(
       file,
       scope: scope,
       reason: 'read failed: ${_truncate(e.toString())}',
@@ -84,7 +103,7 @@ Future<T> readJsonOrQuarantine<T>(
   try {
     parsed = jsonDecode(raw);
   } catch (e) {
-    await _quarantine(
+    await _quarantineWhole(
       file,
       scope: scope,
       reason: 'json parse failed: ${_truncate(e.toString())}',
@@ -93,9 +112,17 @@ Future<T> readJsonOrQuarantine<T>(
     return empty();
   }
   try {
+    if (parsed is List) {
+      return await _decodeListWithPerItemRecovery<T>(
+        file,
+        parsed,
+        decode,
+        scope: scope,
+      );
+    }
     return decode(parsed);
   } catch (e) {
-    await _quarantine(
+    await _quarantineWhole(
       file,
       scope: scope,
       reason: 'decode failed: ${_truncate(e.toString())}',
@@ -105,7 +132,105 @@ Future<T> readJsonOrQuarantine<T>(
   }
 }
 
-Future<void> _quarantine(
+/// Decode a parsed JSON list with per-element recovery.
+///
+/// Calls [decode] once per element as `[elem]`; elements that throw are
+/// treated as "bad records" and isolated. Elements that succeed are
+/// retained. If any bad records were found, the original [file] is
+/// quarantined under a per-item broken name and the surviving raw JSON
+/// elements are atomically re-written to the original path. The final
+/// return value is `decode(survivors)` so the caller's natural return
+/// shape is preserved.
+///
+/// Throws if every element fails (caller falls back to whole-file
+/// quarantine) or if [decode] throws on the survivor batch.
+Future<T> _decodeListWithPerItemRecovery<T>(
+  File file,
+  List<dynamic> parsed,
+  T Function(Object? parsed) decode, {
+  required String scope,
+}) async {
+  final survivorElements = <dynamic>[];
+  final badIndices = <int>[];
+  for (var i = 0; i < parsed.length; i++) {
+    final elem = parsed[i];
+    try {
+      decode([elem]);
+      survivorElements.add(elem);
+    } catch (_) {
+      badIndices.add(i);
+    }
+  }
+  if (badIndices.isEmpty) {
+    // Fast path: every element decoded successfully. Re-invoke on the
+    // full list so the caller's natural batch-level result is returned
+    // (e.g. with any batch-level invariants the decoder enforces).
+    return decode(parsed);
+  }
+  if (survivorElements.isEmpty) {
+    // Every element failed. Throw to let the caller quarantine the
+    // whole file (preserves the old "decode failed" path).
+    throw const FormatException(
+        'per-item decode failed for every element');
+  }
+  // Some elements survived. Quarantine the original file under a
+  // per-item broken name and atomically re-write the survivors.
+  final decoded = decode(survivorElements);
+  final stem = file.uri.pathSegments.last;
+  final micros = DateTime.now().microsecondsSinceEpoch;
+  final counter = (++_quarantineCounter) & 0xFFFF;
+  final brokenPath = '${file.parent.path}/$stem.broken.$scope.$micros.$counter';
+  try {
+    await file.rename(brokenPath);
+  } catch (e) {
+    await DebugService.instance.recordEvent(
+      scope: scope,
+      level: EventLevel.error,
+      message: 'persist: per-item quarantine rename_failed',
+      data: {
+        'file': file.path,
+        'bad_indices': badIndices,
+        'error': _truncate(e.toString()),
+      },
+    );
+    // Even if rename failed, the survivors are still useful in memory.
+    return decoded;
+  }
+  try {
+    await writeJsonAtomic(file, jsonEncode(survivorElements));
+  } catch (e) {
+    await DebugService.instance.recordEvent(
+      scope: scope,
+      level: EventLevel.error,
+      message: 'persist: per-item survivor rewrite failed',
+      data: {
+        'file': file.path,
+        'bad_indices': badIndices,
+        'error': _truncate(e.toString()),
+      },
+    );
+    // Survivors still returned to the caller; the file on disk is now
+    // the quarantined sibling (original was renamed). Next startup will
+    // see no file → empty.
+  }
+  await DebugService.instance.recordEvent(
+    scope: scope,
+    level: EventLevel.error,
+    message: 'persist: per-item quarantined',
+    data: {
+      'file': file.path,
+      'quarantined_to': brokenPath,
+      'bad_indices': badIndices,
+      'survivor_count': survivorElements.length,
+    },
+  );
+  return decoded;
+}
+
+/// Quarantine [file] as a whole — rename aside, emit a DebugService
+/// event. Used for genuine file corruption (read failure, JSON parse
+/// failure) and as the fallback when per-item decode can't recover.
+Future<void> _quarantineWhole(
   File file, {
   required String scope,
   required String reason,

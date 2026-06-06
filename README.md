@@ -16,26 +16,11 @@ flutter analyze              # 静态分析
 
 ## 日志
 
-所有对 Qwen API 的请求与错误都会写入磁盘日志，方便排查批改异常。
+所有对 Qwen API 的调用记录都通过 Debug sink 落盘，格式为 NDJSON（一行一对象）。**不再需要手动 `cat` 日志**——使用 app 内 `/debug` 屏查看，或在每个 tab 点 Export 导出 JSON 文件（macOS 弹 Finder 高亮，iOS 弹 share sheet）。
 
-- **路径**：`getApplicationSupportDirectory()/log/`，按天切分
-- **文件名**：`qwen_YYYY-MM-DD.log`；单文件超过 5 MB 时切到 `qwen_YYYY-MM-DD.1.log`、`.2.log` …
-- **包含**：每次调用的 `model` / `endpoint` / `status` / `elapsed`、消息文本（不含图片 base64）、响应内容；失败时额外记录 `error type` / `message` / 响应体摘要
-- **不含**：图片 base64（图片只记张数）、`Authorization` header
-
-### macOS 找日志
-
-```
-~/Library/Containers/cn.yas.yasLocal/Data/Library/Application Support/log/
-```
-
-直接 `cat` 或 `grep ERROR` 即可。
-
-### iOS 找日志
-
-iOS 沙盒里默认拿不到。如需导出，可在 Xcode → Devices and Simulators → Download Container → 右键显示包内容，路径为 `AppData/Library/Application Support/log/`。
-
-> 早期版本（`Directory('log')` 相对路径）的旧日志在沙盒根 `Library/Containers/cn.yas.yasLocal/Data/log/`，新版本不再写那里，可手动删除。
+磁盘落盘仍可用作离线排查：
+- **macOS**: `~/Library/Containers/cn.yas.yasLocal/Data/Library/Application Support/log/yas_YYYY-MM-DD.log`
+- **iOS**: sandboxed，导出方式同 Debug 屏 Export
 
 ## Getting Started（Flutter 脚手架）
 

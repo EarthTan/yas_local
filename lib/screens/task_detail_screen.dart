@@ -423,6 +423,8 @@ class _S extends ConsumerState<TaskDetailScreen> {
   );
 
   void _showRegradeDialog() {
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -430,7 +432,10 @@ class _S extends ConsumerState<TaskDetailScreen> {
         content: const Text('重新批改将使用当前批改策略覆盖已有的批改结果。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              if (mounted) setState(() => _rerunInProgress = false);
+            },
             child: const Text('取消'),
           ),
           TextButton(
@@ -439,24 +444,28 @@ class _S extends ConsumerState<TaskDetailScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('旧批改结果保留。可随时点击「重新批改」重新批改。')),
               );
+              if (mounted) setState(() => _rerunInProgress = false);
             },
             child: const Text('保留旧结果'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
-            onPressed: () async {
+            onPressed: _rerunInProgress ? null : () async {
               Navigator.of(ctx).pop();
               await ref
                   .read(taskProvider.notifier)
                   .resetGradingResults(widget.taskId);
               if (!mounted) return;
               ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
+              if (mounted) setState(() => _rerunInProgress = false);
             },
             child: const Text('立即重批'),
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      if (mounted) setState(() => _rerunInProgress = false);
+    });
   }
 
   void _rerunFailedGrading() async {
