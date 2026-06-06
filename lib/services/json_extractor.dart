@@ -235,25 +235,75 @@ class JsonExtractor {
     return results;
   }
 
-  static Map<String, dynamic>? _tryObject(String text) {
-    final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
-    if (start == -1 || end == -1 || end <= start) return null;
-    try {
-      return jsonDecode(text.substring(start, end + 1)) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
+  /// Walks [text] and yields every balanced-bracket slice (object or list) in
+  /// document order. Each candidate is the substring from its opening bracket
+  /// to its matching closing bracket, accounting for nesting, quoted strings,
+  /// and JSON-style backslash escapes inside strings.
+  ///
+  /// The previous fallback (`indexOf('{')` + `lastIndexOf('}')`) returned a
+  /// single slice spanning the *first* opening bracket to the *last* closing
+  /// bracket — which collapses any extraneous `{` / `}` characters (common in
+  /// Chinese prose) into one corrupt candidate. This scanner yields each
+  /// balanced slice in turn so callers can try `jsonDecode` on each until
+  /// one succeeds.
+  static List<String> _balancedBracketsCandidates(String text,
+      {required bool isObject}) {
+    final open = isObject ? '{' : '[';
+    final close = isObject ? '}' : ']';
+    final candidates = <String>[];
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] != open) continue;
+      var depth = 0;
+      var inString = false;
+      var escape = false;
+      for (var j = i; j < text.length; j++) {
+        final c = text[j];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (c == r'\') {
+          escape = true;
+          continue;
+        }
+        if (c == '"') {
+          inString = !inString;
+          continue;
+        }
+        if (inString) continue;
+        if (c == open) {
+          depth++;
+        } else if (c == close) {
+          depth--;
+          if (depth == 0) {
+            candidates.add(text.substring(i, j + 1));
+            break;
+          }
+        }
+      }
     }
+    return candidates;
+  }
+
+  static Map<String, dynamic>? _tryObject(String text) {
+    for (final candidate in _balancedBracketsCandidates(text, isObject: true)) {
+      try {
+        return jsonDecode(candidate) as Map<String, dynamic>;
+      } catch (_) {
+        // try next candidate
+      }
+    }
+    return null;
   }
 
   static List<dynamic>? _tryList(String text) {
-    final start = text.indexOf('[');
-    final end = text.lastIndexOf(']');
-    if (start == -1 || end == -1 || end <= start) return null;
-    try {
-      return jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
-    } catch (_) {
-      return null;
+    for (final candidate in _balancedBracketsCandidates(text, isObject: false)) {
+      try {
+        return jsonDecode(candidate) as List<dynamic>;
+      } catch (_) {
+        // try next candidate
+      }
     }
+    return null;
   }
 }

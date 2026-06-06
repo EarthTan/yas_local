@@ -353,4 +353,23 @@ void main() {
       expect(fromKeyAttempt.ok, isTrue);
     });
   });
+
+  // ── Balanced-bracket fallback (A-3) ────────────────────────────────────────
+
+  group('Balanced-bracket fallback (A-3)', () {
+    test('brace-fallback finds 2nd candidate when 1st is corrupt (Chinese {)', () {
+      const input = '我看到一个 { 符号，然后是真 JSON {"a":1} 尾巴 }';
+      // The function should return {"a": 1} (or equivalent), not the corrupt first slice.
+      // Implementation: balanced-bracket scanner walks the input, yields candidates,
+      // and tries each until jsonDecode succeeds.
+      final result = JsonExtractor.requireObjectWithReasoning(input);
+      expect(result.json['a'], 1);
+    });
+
+    test('brace-fallback yields nothing for genuinely invalid input', () {
+      const input = 'no braces at all here';
+      expect(() => JsonExtractor.requireObjectWithReasoning(input),
+          throwsA(isA<JsonParseException>()));
+    });
+  });
 }
