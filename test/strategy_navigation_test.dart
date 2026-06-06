@@ -45,7 +45,7 @@ void main() {
     'confirming all strategies navigates to task hub, not grading screen',
     (tester) async {
       final router = GoRouter(
-        initialLocation: '/tasks/t1/strategy',
+        initialLocation: '/tasks/t1',
         routes: [
           GoRoute(
             path: '/tasks/:id',
@@ -73,6 +73,13 @@ void main() {
       );
       await tester.pump();
 
+      // Walk the router forward to strategy so the stack matches the real
+      // app flow: [/tasks/t1] → [/tasks/t1, /tasks/t1/strategy]. Without
+      // this push, the stack would be [/tasks/t1] and pushReplacement
+      // would behave correctly — the test would not catch the bug.
+      router.push('/tasks/t1/strategy');
+      await tester.pumpAndSettle();
+
       // Find the single FilledButton in the bottom bar (enabled when allConfirmed=true)
       final button = find.byType(FilledButton);
       expect(button, findsOneWidget);
@@ -83,6 +90,18 @@ void main() {
       // Must land on task hub, NOT on grading screen
       expect(find.text('task-hub'), findsOneWidget);
       expect(find.text('grading-screen'), findsNothing);
+
+      // The router stack must contain exactly one /tasks/:id entry. Before
+      // the fix, pushReplacement pushes a duplicate task-detail on top of
+      // the existing one, so the stack has two matches for /tasks/:id.
+      final matches = router.routerDelegate.currentConfiguration.matches;
+      final taskHubCount = matches
+          .where((m) => m.matchedLocation == '/tasks/t1')
+          .length;
+      expect(taskHubCount, 1,
+          reason:
+              'GoRouter stack should have exactly one /tasks/:id entry after strategy 完成; '
+              'pushReplacement leaves the prior instance in the stack.');
     },
   );
 }
