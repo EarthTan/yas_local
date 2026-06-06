@@ -56,6 +56,21 @@ void main() {
       expect(QwenError.from(e).shouldRetry, isFalse);
     });
 
+    test('badResponse with null status -> badResponse (S-12), not retryable', () {
+      // DioExceptionType.badResponse with no response.statusCode is the
+      // path that used to fall into `unknown` (retried 3 times). S-12
+      // splits this into a dedicated non-retryable kind.
+      final e = DioException(
+        requestOptions: RequestOptions(path: '/x'),
+        type: DioExceptionType.badResponse,
+      );
+      final q = QwenError.from(e);
+      expect(q.kind, QwenErrorKind.badResponse,
+          reason: 'S-12: badResponse is its own kind, not unknown');
+      expect(q.shouldRetry, isFalse,
+          reason: 'S-12: badResponse is non-retryable');
+    });
+
     test('status 500 -> http5xx', () {
       final e = DioException(
         requestOptions: RequestOptions(path: '/x'),

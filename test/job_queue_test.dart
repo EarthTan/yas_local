@@ -424,6 +424,13 @@ void main() {
         reason: 'only the first unit grades; cancel skips the rest',
       );
       expect(container.read(jobQueueProvider)['t1']!.done, 1);
+      // S-5 fix: cancelled job must end as `failed` with the cancel marker,
+      // not `done` (the previous behavior made "已取消" jobs look like
+      // successful completions on the home card).
+      final job = container.read(jobQueueProvider)['t1']!;
+      expect(job.phase, JobPhase.failed,
+          reason: 'cancelled job phases to failed (S-5 fix)');
+      expect(job.error, '用户已取消');
     });
   });
 
