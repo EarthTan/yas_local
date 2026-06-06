@@ -132,7 +132,7 @@ class QuestionPage extends StatelessWidget {
                             color: Colors.black87,
                           ),
                         ),
-                        SizedBox(height: 2),
+                        SizedBox(height: 8),
                         Text(
                           '建议在「识别题目」步骤补充',
                           style: TextStyle(
