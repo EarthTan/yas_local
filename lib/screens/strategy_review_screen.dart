@@ -339,7 +339,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                             .read(jobQueueProvider.notifier)
                             .clear(widget.taskId);
                         if (context.mounted) {
-                          context.pushReplacement('/tasks/${widget.taskId}');
+                          context.go('/tasks/${widget.taskId}');
                         }
                       },
                       icon: const Icon(Icons.check),
