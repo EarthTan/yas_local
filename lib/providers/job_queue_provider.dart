@@ -276,8 +276,13 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       });
 
       _patch(taskId, (j) {
-        final phase = j.failedCount > 0 ? JobPhase.failed : JobPhase.done;
-        return j.copyWith(phase: phase);
+        final phase = j.cancelRequested
+            ? JobPhase.failed
+            : (j.failedCount > 0 ? JobPhase.failed : JobPhase.done);
+        return j.copyWith(
+          phase: phase,
+          error: j.cancelRequested ? '用户已取消' : j.error,
+        );
       });
     } catch (e) {
       // Any failure outside the per-unit try (e.g. ReferenceStore.load) must
@@ -403,8 +408,13 @@ class JobQueueNotifier extends StateNotifier<Map<String, JobState>> {
       }
 
       _patch(taskId, (j) {
-        final phase = j.failedCount > 0 ? JobPhase.failed : JobPhase.done;
-        return j.copyWith(phase: phase);
+        final phase = j.cancelRequested
+            ? JobPhase.failed
+            : (j.failedCount > 0 ? JobPhase.failed : JobPhase.done);
+        return j.copyWith(
+          phase: phase,
+          error: j.cancelRequested ? '用户已取消' : j.error,
+        );
       });
     } catch (e) {
       // e.g. ReferenceStore.save failure — still reach a terminal phase so
