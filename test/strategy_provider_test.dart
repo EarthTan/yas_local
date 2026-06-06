@@ -647,14 +647,22 @@ void main() {
       n.editCheckpoint(1, 'cp1', description: 'updated');
       // Immediately call saveAllConfirmed (within the 500ms debounce window).
       await n.saveAllConfirmed('t1');
-      // After 600ms (past the debounce), the file should still exist
-      // (proving the immediate write happened) and NOT have been
-      // rewritten again (proving the pending timer was cancelled).
-      await Future<void>.delayed(const Duration(milliseconds: 600));
       final cacheFile = File('${tmp.path}/reference_t1.json');
       expect(await cacheFile.exists(), isTrue);
-      // The post-edit state should be on disk.
-      final raw = await cacheFile.readAsString();
+      // Capture the mtime of the immediate write.
+      final mtimeAfterImmediate = cacheFile.statSync().modified;
+      // Wait past the 500ms debounce window. If the pending timer was
+      // NOT cancelled, it fires and rewrites the file (mtime advances).
+      // If the timer WAS cancelled, the file is not touched again.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      final mtimeAfterDebounce = cacheFile.statSync().modified;
+      expect(
+        mtimeAfterDebounce,
+        equals(mtimeAfterImmediate),
+        reason: 'pending debounce timer must be cancelled by saveAllConfirmed',
+      );
+      // The post-edit state should still be on disk.
+      final raw = cacheFile.readAsStringSync();
       expect(raw.contains('updated'), isTrue);
     });
   });
