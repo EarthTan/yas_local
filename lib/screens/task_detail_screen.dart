@@ -68,7 +68,20 @@ class _S extends ConsumerState<TaskDetailScreen> {
     if (task == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('任务详情')),
-        body: const Center(child: Text('任务不存在')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('任务不存在'),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => GoRouter.of(context).go('/'),
+                icon: const Icon(Icons.home),
+                label: const Text('返回首页'),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
