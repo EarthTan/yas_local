@@ -16,7 +16,7 @@
 |---|---|
 | `lib/screens/strategy_review_screen.dart` | Replace `pushReplacement` with `go` on line 341 |
 | `lib/screens/capture_screen.dart` | Replace `pushReplacement` with `go` on line 98 |
-| `test/strategy_navigation_test.dart` | Add stack-length assertion to existing test |
+| `test/strategy_navigation_test.dart` | Restructure setup to model real stack + add stack-length assertion |
 
 `lib/screens/create_task_screen.dart:140` is intentionally NOT changed (its target route is not in the stack — see spec).
 
@@ -24,16 +24,58 @@ No new files in `lib/`. Two files modified in `lib/`. One test modified.
 
 ---
 
-## Task 1: Add failing stack-length assertion to strategy navigation test
+## Task 1: Restructure strategy navigation test to model real stack and assert single task-detail
 
 **Files:**
 - Modify: `test/strategy_navigation_test.dart:44-87`
 
-The existing test asserts `find.text('task-hub')` is present after tapping 完成, but does NOT assert the stack length. Add the assertion so the test fails on the current (buggy) code.
+The existing test starts the router at `/tasks/t1/strategy`, which does NOT model the real app flow. In the real app, the user navigates `/` → `/tasks/:id` → `/tasks/:id/strategy`, so the stack at strategy time is `[/tasks/:id, /tasks/:id/strategy]`. With the existing test setup, the stack is just `[/tasks/:id/strategy]` — pushReplacement behaves correctly in that empty-prior case. The test must build the real stack before pressing 完成, otherwise the assertion can't catch the bug.
 
-- [ ] **Step 1: Add stack-length assertion**
+- [ ] **Step 1: Update the test setup to model the real stack**
 
-Edit `test/strategy_navigation_test.dart`. After the existing `expect(find.text('grading-screen'), findsNothing);` (line 85), add:
+In `test/strategy_navigation_test.dart`, change `initialLocation` from `/tasks/t1/strategy` to `/tasks/t1`, then after `pumpWidget` push the strategy route to put the stack into `[/tasks/t1, /tasks/t1/strategy]`. The full new setup:
+
+```dart
+      final router = GoRouter(
+        initialLocation: '/tasks/t1',
+        routes: [
+          GoRoute(
+            path: '/tasks/:id',
+            builder: (_, _) => const Scaffold(body: Text('task-hub')),
+          ),
+          GoRoute(
+            path: '/tasks/:id/strategy',
+            builder: (_, s) =>
+                StrategyReviewScreen(taskId: s.pathParameters['id']!),
+          ),
+          GoRoute(
+            path: '/tasks/:id/grading',
+            builder: (_, _) => const Scaffold(body: Text('grading-screen')),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            strategyProvider.overrideWith((ref) => _AllConfirmedNotifier(ref)),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pump();
+
+      // Walk the router forward to strategy so the stack matches the real
+      // app flow: [/tasks/t1] → [/tasks/t1, /tasks/t1/strategy]. Without
+      // this push, the stack would be [/tasks/t1] and pushReplacement
+      // would behave correctly — the test would not catch the bug.
+      router.push('/tasks/t1/strategy');
+      await tester.pumpAndSettle();
+```
+
+- [ ] **Step 2: Add stack-length assertion after the existing expects**
+
+After the existing `expect(find.text('grading-screen'), findsNothing);` (line 85), add:
 
 ```dart
       // The router stack must contain exactly one /tasks/:id entry. Before
@@ -49,12 +91,12 @@ Edit `test/strategy_navigation_test.dart`. After the existing `expect(find.text(
               'pushReplacement leaves the prior instance in the stack.');
 ```
 
-- [ ] **Step 2: Run the test to verify it fails on current code**
+- [ ] **Step 3: Run the test to verify it fails on current (buggy) code**
 
 Run: `cd yas_local && flutter test test/strategy_navigation_test.dart`
-Expected: FAIL with `Expected: 1, Actual: 2` from the `taskHubCount` assertion. (The first two `expect` calls in the existing test pass — they only check the visible screen, not the stack.)
+Expected: FAIL with `Expected: 1, Actual: 2` from the `taskHubCount` assertion. The earlier `find.text('task-hub')` expect still passes (the visible screen is correct) — only the new stack-length assertion fails.
 
-- [ ] **Step 3: Commit the failing test**
+- [ ] **Step 4: Commit the failing test**
 
 ```bash
 cd yas_local
