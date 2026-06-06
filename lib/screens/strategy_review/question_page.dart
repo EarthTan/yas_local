@@ -275,7 +275,7 @@ class _CheckpointRowState extends State<_CheckpointRow> {
         child: InkWell(
           onTap: widget.onTap,
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
             margin: const EdgeInsets.only(bottom: 4),
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
