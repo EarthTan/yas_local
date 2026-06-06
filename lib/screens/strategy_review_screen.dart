@@ -216,18 +216,6 @@ class _S extends ConsumerState<StrategyReviewScreen> {
               onTap: _goTo,
             ),
           ),
-          if (job != null && job.attempt > 0 && job.lastErrorKind != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Text(
-                '⟳ ${job.lastErrorUnit ?? "当前题"} · 重试 ${job.attempt}/3 · ${job.lastErrorKind!.displayName}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.deepOrange,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
           Expanded(
             child: PageView.builder(
               controller: _pageController,
@@ -248,6 +236,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   maxPoints: rubricItem?.maxPoints ?? 0,
                   questionType: rubricItem?.type == 'objective' ? '客观题' : '主观题',
                   questionText: rubricItem?.questionText,
+                  job: job,
                   onEditCheckpoint: (id, cp) => _openEditSheet(r, id, cp),
                   onAddCheckpoint: () => _openAddSheet(r),
                   onRetry: () =>
