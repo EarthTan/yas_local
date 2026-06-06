@@ -98,10 +98,29 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
 
   /// Loads cached references from disk into state (no generation — bulk
   /// generation is owned by JobQueueNotifier.startStrategy).
+  ///
+  /// Any reference whose `questionNumber` is no longer in the task's rubric
+  /// (e.g. the teacher deleted that rubric item after generation) is tagged
+  /// with `missingFromRubric = true` so the UI can show a banner instead of
+  /// the misleading 0-point render.
   Future<void> load(String taskId) async {
     _saveTaskId = taskId;
     final cached = await ReferenceStore.load(taskId);
-    state = state.copyWith(references: cached);
+    final task = ref.read(taskProvider.notifier).taskById(taskId);
+    final List<ReferenceAnswer> tagged;
+    if (task == null) {
+      tagged = cached;
+    } else {
+      final rubricNumbers = task.rubric.map((r) => r.questionNumber).toSet();
+      tagged = [
+        for (final r in cached)
+          if (!rubricNumbers.contains(r.questionNumber))
+            r.copyWith(missingFromRubric: true)
+          else
+            r,
+      ];
+    }
+    state = state.copyWith(references: tagged);
   }
 
   /// Cancel any pending debounced save and persist immediately. Used by
@@ -287,6 +306,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         level: EventLevel.error,
         data: {'error': e.toString()},
       );
+      // Rethrow so callers (e.g. ChatSheet._handleSend) can show a
+      // SnackBar at the top of the screen. The chat history has already
+      // been updated with the error message above, so the UI still has
+      // a record of the failure.
+      rethrow;
     }
     if (myToken != _token) return; // disposed mid-flight
     _scheduleSave(taskId);

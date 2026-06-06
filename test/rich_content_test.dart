@@ -91,6 +91,10 @@ void main() {
       );
       await tester.pump();
       expect(find.byType(MarkdownBody), findsOneWidget);
+      // Assert: LaTeX source text is NOT visible (it should be replaced by
+      // a rendered math widget — Math.tex). If _InlineMathBuilder regressed
+      // to returning Text('E = mc^2'), this assertion would fail.
+      expect(find.text('E = mc^2'), findsNothing);
     });
 
     testWidgets('块级 LaTeX 不崩溃', (tester) async {
@@ -103,6 +107,10 @@ void main() {
       );
       await tester.pump();
       expect(find.byType(MarkdownBody), findsOneWidget);
+      // Assert: LaTeX source text is NOT visible (it should be replaced by
+      // a rendered math widget — Math.tex). If _BlockMathBuilder regressed
+      // to returning Text(latex), this assertion would fail.
+      expect(find.text(r'\int_0^\infty e^{-x}\,dx = 1'), findsNothing);
     });
 
     testWidgets('空字符串不崩溃', (tester) async {

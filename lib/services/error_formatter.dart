@@ -30,9 +30,20 @@ class ErrorFormatter {
       _ => '❌ HTTP $status',
     };
 
+    const kUrlDisplayMax = 80;
+    final displayUrl = actualUrl.length > kUrlDisplayMax
+        ? '${actualUrl.substring(0, kUrlDisplayMax)}…(已截断 ${actualUrl.length - kUrlDisplayMax} 字符)'
+        : actualUrl;
+
+    final warnings = <String>[];
+    if (actualUrl.contains('?key=') || actualUrl.contains('?api_key=')) {
+      warnings.add('⚠️ URL 含 ?key= / ?api_key= — API key 可能已暴露，请改用 Authorization header 鉴权');
+    }
+
     return [
       header,
-      '实际请求 URL：\n$actualUrl',
+      '实际请求 URL：\n$displayUrl',
+      if (warnings.isNotEmpty) warnings.join('\n'),
       if (snippet.isNotEmpty) '服务器返回：\n$snippet',
     ].join('\n\n');
   }

@@ -138,7 +138,6 @@ class HomeScreen extends ConsumerWidget {
     final state = ref.watch(taskProvider);
     final configured = ref.watch(settingsProvider).isConfigured;
     final jobs = ref.watch(jobQueueProvider);
-    final notifier = ref.read(taskProvider.notifier);
     return Scaffold(
       appBar: AppBar(
         title: const Text('YAS 批改助手'),
@@ -167,87 +166,106 @@ class HomeScreen extends ConsumerWidget {
                 ? const Center(child: CircularProgressIndicator())
                 : state.tasks.isEmpty
                 ? const Center(child: Text('暂无批改任务，点击 + 新建'))
-                : ListView(
-                    children: [
-                      for (final t in state.tasks.reversed)
-                        Builder(
-                          builder: (context) {
-                            final subs = notifier.submissionsFor(t.id);
-                            final status = resolveTaskCardStatus(
-                              job: jobs[t.id],
-                              subject: t.subject,
-                              subTotal: subs.length,
-                              subDone: subs
-                                  .where(
-                                    (s) => s.status == SubmissionStatus.done,
-                                  )
-                                  .length,
-                              subFailed: subs
-                                  .where(
-                                    (s) => s.status == SubmissionStatus.failed,
-                                  )
-                                  .length,
-                              retryKind: jobs[t.id]?.lastErrorKind,
-                              retryAttempt: jobs[t.id]?.attempt ?? 0,
-                            );
-                            return ListTile(
-                              title: Text(
-                                t.name,
-                                style: const TextStyle(color: Colors.black87),
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    status.label,
-                                    style: TextStyle(
-                                      color: _statusColor(status.kind),
-                                    ),
+                : Builder(
+                    builder: (context) {
+                      // Group submissions by taskId in a single pass (was:
+                      // O(N×M) per build, ~900 comparisons for 10 tasks ×
+                      // 30 submissions).
+                      final subsByTask = <String, List<Submission>>{};
+                      for (final s in state.submissions) {
+                        subsByTask
+                            .putIfAbsent(s.taskId, () => <Submission>[])
+                            .add(s);
+                      }
+                      return ListView(
+                        children: [
+                          for (final t in state.tasks.reversed)
+                            Builder(
+                              builder: (context) {
+                                final subs =
+                                    subsByTask[t.id] ?? const <Submission>[];
+                                final status = resolveTaskCardStatus(
+                                  job: jobs[t.id],
+                                  subject: t.subject,
+                                  subTotal: subs.length,
+                                  subDone: subs
+                                      .where(
+                                        (s) =>
+                                            s.status == SubmissionStatus.done,
+                                      )
+                                      .length,
+                                  subFailed: subs
+                                      .where(
+                                        (s) =>
+                                            s.status == SubmissionStatus.failed,
+                                      )
+                                      .length,
+                                  retryKind: jobs[t.id]?.lastErrorKind,
+                                  retryAttempt: jobs[t.id]?.attempt ?? 0,
+                                );
+                                return ListTile(
+                                  title: Text(
+                                    t.name,
+                                    style: const TextStyle(color: Colors.black87),
                                   ),
-                                  if (status.progress != null ||
-                                      status.indeterminate) ...[
-                                    const SizedBox(height: 6),
-                                    LinearProgressIndicator(
-                                      value: status.indeterminate
-                                          ? null
-                                          : status.progress,
-                                    ),
-                                  ],
-                                  if (status.retryHint != null) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      status.retryHint!,
-                                      style: const TextStyle(
-                                        color: Colors.deepOrange,
-                                        fontSize: 12,
-                                        fontStyle: FontStyle.italic,
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        status.label,
+                                        style: TextStyle(
+                                          color: _statusColor(status.kind),
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              trailing: status.kind ==
-                                          TaskCardKind.gradingFailed ||
-                                      status.kind == TaskCardKind.strategyFailed
-                                  ? const Icon(Icons.refresh, color: Colors.red)
-                                  : const Icon(Icons.chevron_right),
-                              // A failed card promises "点击重试": tapping re-runs
-                              // the corresponding job (strategy or grading), which
-                              // targets only the unfinished units. Other cards open
-                              // the task.
-                              onTap: status.kind == TaskCardKind.gradingFailed
-                                  ? () => ref
-                                        .read(jobQueueProvider.notifier)
-                                        .startGrading(t.id)
-                                  : status.kind == TaskCardKind.strategyFailed
-                                  ? () => ref
-                                        .read(jobQueueProvider.notifier)
-                                        .startStrategy(t.id)
-                                  : () => context.push('/tasks/${t.id}'),
-                            );
-                          },
-                        ),
-                    ],
+                                      if (status.progress != null ||
+                                          status.indeterminate) ...[
+                                        const SizedBox(height: 6),
+                                        LinearProgressIndicator(
+                                          value: status.indeterminate
+                                              ? null
+                                              : status.progress,
+                                        ),
+                                      ],
+                                      if (status.retryHint != null) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          status.retryHint!,
+                                          style: const TextStyle(
+                                            color: Colors.deepOrange,
+                                            fontSize: 12,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  trailing: status.kind ==
+                                              TaskCardKind.gradingFailed ||
+                                          status.kind ==
+                                              TaskCardKind.strategyFailed
+                                      ? const Icon(Icons.refresh,
+                                          color: Colors.red)
+                                      : const Icon(Icons.chevron_right),
+                                  // A failed card promises "点击重试": tapping re-runs
+                                  // the corresponding job (strategy or grading),
+                                  // which targets only the unfinished units. Other
+                                  // cards open the task.
+                                  onTap: status.kind == TaskCardKind.gradingFailed
+                                      ? () => ref
+                                            .read(jobQueueProvider.notifier)
+                                            .startGrading(t.id)
+                                      : status.kind ==
+                                              TaskCardKind.strategyFailed
+                                          ? () => ref
+                                                .read(jobQueueProvider.notifier)
+                                                .startStrategy(t.id)
+                                          : () => context.push('/tasks/${t.id}'),
+                                );
+                              },
+                            ),
+                        ],
+                      );
+                    },
                   ),
           ),
         ],

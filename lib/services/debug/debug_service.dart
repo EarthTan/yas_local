@@ -283,6 +283,7 @@ class DebugService {
   void clear() {
     _memorySink?.clear();
     _stateSnapshot = null;
+    _stats.reset();
   }
 
   /// Test-only helper. Resets the enabled flag, clears all ring buffers +

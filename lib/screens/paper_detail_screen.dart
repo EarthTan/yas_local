@@ -2,16 +2,31 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/task_provider.dart';
+import '../utils/debouncer.dart';
 import '../widgets/rich_content.dart';
 
-class PaperDetailScreen extends ConsumerWidget {
+class PaperDetailScreen extends ConsumerStatefulWidget {
   final String submissionId;
   const PaperDetailScreen({super.key, required this.submissionId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PaperDetailScreen> createState() => _PaperDetailScreenState();
+}
+
+class _PaperDetailScreenState extends ConsumerState<PaperDetailScreen> {
+  final Map<int, double> _dragValues = {};
+  final Debouncer _saveDebouncer = Debouncer(const Duration(milliseconds: 200));
+
+  @override
+  void dispose() {
+    _saveDebouncer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(taskProvider);
-    final sub = state.submissions.firstWhere((s) => s.id == submissionId);
+    final sub = state.submissions.firstWhere((s) => s.id == widget.submissionId);
     final notifier = ref.read(taskProvider.notifier);
     final task = notifier.taskById(sub.taskId);
     final rubricByNum = {
@@ -26,7 +41,11 @@ class PaperDetailScreen extends ConsumerWidget {
           Image.file(File(sub.imagePath!), height: 220, fit: BoxFit.contain),
         for (final item in sub.items)
           Builder(builder: (context) {
-            final maxPts = rubricByNum[item.questionNumber]?.maxPoints ?? 20;
+            final maxPts = rubricByNum[item.questionNumber]?.maxPoints ??
+                (item.checkpoints.isNotEmpty
+                    ? item.checkpoints
+                        .fold<int>(0, (sum, c) => sum + c.pointsAwarded)
+                    : 20);
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Padding(
@@ -97,12 +116,26 @@ class PaperDetailScreen extends ConsumerWidget {
                     const Text('改分：'),
                     Expanded(
                       child: Slider(
-                        value: item.finalScore.toDouble().clamp(0, maxPts.toDouble()),
+                        value: _dragValues[item.questionNumber] ?? item.finalScore.toDouble().clamp(0, maxPts.toDouble()),
                         min: 0,
                         max: maxPts.toDouble(),
                         divisions: maxPts,
-                        label: '${item.finalScore}',
+                        label: (_dragValues[item.questionNumber] ?? item.finalScore.toDouble()).round().toString(),
                         onChanged: (v) {
+                          setState(() => _dragValues[item.questionNumber] = v);
+                          _saveDebouncer(() {
+                            final updated = [
+                              for (final it in sub.items)
+                                if (it.questionNumber == item.questionNumber)
+                                  it.copyWith(teacherScore: v.round())
+                                else
+                                  it,
+                            ];
+                            notifier.updateSubmission(sub.copyWith(items: updated));
+                          });
+                        },
+                        onChangeEnd: (v) {
+                          _saveDebouncer.flush();
                           final updated = [
                             for (final it in sub.items)
                               if (it.questionNumber == item.questionNumber)

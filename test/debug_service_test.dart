@@ -180,6 +180,23 @@ void main() {
       expect(DebugService.instance.stateSnapshot, isNull);
       expect(DebugService.instance.enabled, isTrue); // clear() must not touch _enabled
     });
+
+    test('clear() resets _stats', () async {
+      await DebugService.instance.recordQwenCall(QwenCallRecord(
+        timestamp: DateTime.now(),
+        scope: 'grade',
+        model: 'm',
+        endpoint: 'https://e',
+        statusCode: 200,
+        elapsedMs: 100,
+        status: QwenCallStatus.ok,
+        messages: const [],
+        responseContent: 'r',
+      ));
+      expect(DebugService.instance.stats.snapshot().totalCalls, greaterThan(0));
+      DebugService.instance.clear();
+      expect(DebugService.instance.stats.snapshot().totalCalls, 0);
+    });
   });
 
   group('changes Listenable', () {

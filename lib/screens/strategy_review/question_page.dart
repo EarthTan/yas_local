@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/checkpoint.dart';
+import '../../models/job_state.dart';
 import '../../models/reference_answer.dart';
 import '../../widgets/rich_content.dart';
 
@@ -40,6 +41,11 @@ class QuestionPage extends StatelessWidget {
   // Question stem (题干). Null or empty means the rubric has no text for this
   // question — we surface a "未识别题面" hint in that case.
   final String? questionText;
+  // Per-task strategy job (may be null). When set, the in-flight retry banner
+  // is rendered for whichever question matches `job.lastErrorUnit`. Scoped to
+  // the question's own card so the teacher looking at, say, question 5 does
+  // not see "⟳ 第 3 题 · 重试 2/3" floating above it.
+  final JobState? job;
   final void Function(String checkpointId, CheckpointDef cp) onEditCheckpoint;
   final VoidCallback onAddCheckpoint;
   final VoidCallback? onRetry;
@@ -53,6 +59,7 @@ class QuestionPage extends StatelessWidget {
     required this.onAddCheckpoint,
     this.onRetry,
     this.questionText,
+    this.job,
   });
 
   @override
@@ -62,12 +69,27 @@ class QuestionPage extends StatelessWidget {
     final failed = r.checkpoints.isEmpty;
     final stem = (questionText ?? '').trim();
     final hasStem = stem.isNotEmpty;
+    // Build the same "第 N 题" label the job queue uses for lastErrorUnit, so
+    // the in-flight-retry check below matches by string equality.
+    final unitLabel = '第 ${r.questionNumber} 题';
+    final showRetryBanner = job != null &&
+        job!.attempt > 0 &&
+        job!.lastErrorKind != null &&
+        job!.lastErrorUnit == unitLabel;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (showRetryBanner)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '⟳ ${job!.lastErrorUnit ?? unitLabel} · 重试 ${job!.attempt}/3 · ${job!.lastErrorKind!.displayName}',
+                style: TextStyle(color: Colors.orange[800], fontSize: 12),
+              ),
+            ),
           Row(
             children: [
               Text(
@@ -85,6 +107,14 @@ class QuestionPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+          if (r.missingFromRubric)
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                '该题已从 rubric 中移除，原分数不再适用',
+                style: TextStyle(color: Colors.orange[800], fontSize: 12),
+              ),
+            ),
           if (hasStem)
             Container(
               width: double.infinity,
@@ -132,7 +162,7 @@ class QuestionPage extends StatelessWidget {
                             color: Colors.black87,
                           ),
                         ),
-                        SizedBox(height: 2),
+                        SizedBox(height: 8),
                         Text(
                           '建议在「识别题目」步骤补充',
                           style: TextStyle(
@@ -179,25 +209,9 @@ class QuestionPage extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           ...r.checkpoints.map(
-            (c) => InkWell(
+            (c) => _CheckpointRow(
+              checkpoint: c,
               onTap: () => onEditCheckpoint(c.id, c),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                margin: const EdgeInsets.only(bottom: 4),
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Expanded(child: RichContent(c.description)),
-                    const SizedBox(width: 8),
-                    Text('${c.points}分',
-                        style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -229,6 +243,57 @@ class QuestionPage extends StatelessWidget {
               ],
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Tappable row for a single checkpoint. Adds a leading chevron and a hover
+/// background so the row reads as interactive even before the InkWell ripple
+/// fires (fixes U-16: mouse users had no way to know the row was tappable).
+class _CheckpointRow extends StatefulWidget {
+  final CheckpointDef checkpoint;
+  final VoidCallback onTap;
+
+  const _CheckpointRow({required this.checkpoint, required this.onTap});
+
+  @override
+  State<_CheckpointRow> createState() => _CheckpointRowState();
+}
+
+class _CheckpointRowState extends State<_CheckpointRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.checkpoint;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered ? Colors.grey.shade100 : Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                Expanded(child: RichContent(c.description)),
+                const SizedBox(width: 8),
+                Text('${c.points}分',
+                    style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.w500)),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, size: 18, color: Colors.black54),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

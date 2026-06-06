@@ -95,14 +95,17 @@ class _S extends ConsumerState<StrategyReviewScreen> {
     );
   }
 
-  void _nextUnconfirmed() {
+  /// Returns true if navigation happened; false if there are no more
+  /// unconfirmed questions (i.e. the teacher just confirmed the last one).
+  bool _nextUnconfirmed() {
     final refs = ref.read(strategyProvider).references;
     for (var i = 0; i < refs.length; i++) {
       if (!refs[i].confirmed) {
         _goTo(i);
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   @override
@@ -144,7 +147,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
               Text(
-                '正在生成第 ${done + 1}/$total 题的批改策略...',
+                '正在生成第 $done/$total 题的批改策略...',
                 style: const TextStyle(color: Colors.black87),
               ),
               const SizedBox(height: 12),
@@ -213,18 +216,6 @@ class _S extends ConsumerState<StrategyReviewScreen> {
               onTap: _goTo,
             ),
           ),
-          if (job != null && job.attempt > 0 && job.lastErrorKind != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Text(
-                '⟳ ${job.lastErrorUnit ?? "当前题"} · 重试 ${job.attempt}/3 · ${job.lastErrorKind!.displayName}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.deepOrange,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
           Expanded(
             child: PageView.builder(
               controller: _pageController,
@@ -245,6 +236,7 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                   maxPoints: rubricItem?.maxPoints ?? 0,
                   questionType: rubricItem?.type == 'objective' ? '客观题' : '主观题',
                   questionText: rubricItem?.questionText,
+                  job: job,
                   onEditCheckpoint: (id, cp) => _openEditSheet(r, id, cp),
                   onAddCheckpoint: () => _openAddSheet(r),
                   onRetry: () =>
@@ -319,7 +311,16 @@ class _S extends ConsumerState<StrategyReviewScreen> {
                     } else {
                       notifier.confirmQuestion(currentRef.questionNumber);
                       HapticFeedback.lightImpact();
-                      _nextUnconfirmed();
+                      final moved = _nextUnconfirmed();
+                      if (!moved) {
+                        HapticFeedback.heavyImpact();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('全部题已确认，可开始批改'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
                     }
                   },
                   onNext: () {

@@ -68,7 +68,20 @@ class _S extends ConsumerState<TaskDetailScreen> {
     if (task == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('任务详情')),
-        body: const Center(child: Text('任务不存在')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('任务不存在'),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => GoRouter.of(context).go('/'),
+                icon: const Icon(Icons.home),
+                label: const Text('返回首页'),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -333,7 +346,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.deepOrange,
                     ),
-                    onPressed: _showRegradeDialog,
+                    onPressed: _rerunInProgress ? null : _showRegradeDialog,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重新批改'),
                   ),
@@ -424,7 +437,6 @@ class _S extends ConsumerState<TaskDetailScreen> {
 
   void _showRegradeDialog() {
     if (_rerunInProgress) return;
-    setState(() => _rerunInProgress = true);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -432,40 +444,17 @@ class _S extends ConsumerState<TaskDetailScreen> {
         content: const Text('重新批改将使用当前批改策略覆盖已有的批改结果。'),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              if (mounted) setState(() => _rerunInProgress = false);
-            },
+            onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('旧批改结果保留。可随时点击「重新批改」重新批改。')),
-              );
-              if (mounted) setState(() => _rerunInProgress = false);
-            },
-            child: const Text('保留旧结果'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
-            onPressed: _rerunInProgress ? null : () async {
-              Navigator.of(ctx).pop();
-              await ref
-                  .read(taskProvider.notifier)
-                  .resetGradingResults(widget.taskId);
-              if (!mounted) return;
-              ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
-              if (mounted) setState(() => _rerunInProgress = false);
-            },
+            onPressed: () => _rerunAllGrading(ctx),
             child: const Text('立即重批'),
           ),
         ],
       ),
-    ).whenComplete(() {
-      if (mounted) setState(() => _rerunInProgress = false);
-    });
+    );
   }
 
   void _rerunFailedGrading() async {
@@ -500,6 +489,24 @@ class _S extends ConsumerState<TaskDetailScreen> {
       await ref
           .read(jobQueueProvider.notifier)
           .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    } finally {
+      if (mounted) setState(() => _rerunInProgress = false);
+    }
+  }
+
+  // Used by the "立即重批" dialog button. Pops the dialog and triggers a
+  // full regrade (resetGradingResults + startGrading), guarded by
+  // _rerunInProgress so rapid double-taps cannot queue a second run.
+  Future<void> _rerunAllGrading(BuildContext dialogCtx) async {
+    Navigator.of(dialogCtx).pop();
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
+    try {
+      await ref
+          .read(taskProvider.notifier)
+          .resetGradingResults(widget.taskId);
+      if (!mounted) return;
+      ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
     } finally {
       if (mounted) setState(() => _rerunInProgress = false);
     }

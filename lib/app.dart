@@ -37,6 +37,14 @@ class YasApp extends ConsumerWidget {
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
           useMaterial3: true,
         ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF2563EB),
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
+        themeMode: ThemeMode.system,
         routerConfig: _router,
       );
 }

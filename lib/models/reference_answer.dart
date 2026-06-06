@@ -9,6 +9,12 @@ class ReferenceAnswer {
   final bool confirmed;
   final List<StrategyMessage> chatHistory;
   final String? reasoning;
+  // Set by StrategyNotifier when loading a cached reference whose
+  // questionNumber is no longer present in the task's rubric (i.e. the
+  // teacher removed that question after generation). The reference is kept
+  // on disk for grading integrity, but the UI surfaces a banner so the
+  // teacher knows the 0-point render is meaningless.
+  final bool missingFromRubric;
 
   const ReferenceAnswer({
     required this.questionNumber,
@@ -18,6 +24,7 @@ class ReferenceAnswer {
     this.confirmed = false,
     this.chatHistory = const [],
     this.reasoning,
+    this.missingFromRubric = false,
   });
 
   ReferenceAnswer copyWith({
@@ -27,6 +34,7 @@ class ReferenceAnswer {
     bool? confirmed,
     List<StrategyMessage>? chatHistory,
     String? reasoning,
+    bool? missingFromRubric,
   }) =>
       ReferenceAnswer(
         questionNumber: questionNumber,
@@ -36,6 +44,7 @@ class ReferenceAnswer {
         confirmed: confirmed ?? this.confirmed,
         chatHistory: chatHistory ?? this.chatHistory,
         reasoning: reasoning ?? this.reasoning,
+        missingFromRubric: missingFromRubric ?? this.missingFromRubric,
       );
 
   Map<String, dynamic> toJson() => {
@@ -46,6 +55,7 @@ class ReferenceAnswer {
         'confirmed': confirmed,
         'chatHistory': chatHistory.map((m) => m.toJson()).toList(),
         'reasoning': reasoning,
+        'missingFromRubric': missingFromRubric,
       };
 
   factory ReferenceAnswer.fromJson(Map<String, dynamic> json) {
@@ -73,6 +83,7 @@ class ReferenceAnswer {
           .map(StrategyMessage.fromJson)
           .toList(),
       reasoning: json['reasoning'] as String?,
+      missingFromRubric: json['missingFromRubric'] as bool? ?? false,
     );
   }
 }
