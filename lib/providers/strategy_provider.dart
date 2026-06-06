@@ -250,6 +250,11 @@ class StrategyNotifier extends StateNotifier<StrategyState> {
         level: EventLevel.error,
         data: {'error': e.toString()},
       );
+      // Rethrow so callers (e.g. ChatSheet._handleSend) can show a
+      // SnackBar at the top of the screen. The chat history has already
+      // been updated with the error message above, so the UI still has
+      // a record of the failure.
+      rethrow;
     }
   }
 

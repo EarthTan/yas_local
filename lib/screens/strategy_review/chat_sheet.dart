@@ -116,11 +116,27 @@ class _ChatSheetState extends ConsumerState<ChatSheet> {
   void _handleSend() {
     final text = _input.text.trim();
     if (text.isEmpty) return;
-    ref
-        .read(strategyProvider.notifier)
-        .sendMessage(widget.taskId, widget.questionNumber, text);
     _input.clear();
     setState(() {});
+    // Capture the messenger BEFORE the await: if the sheet is dismissed
+    // mid-flight, we still want the SnackBar to surface on the parent
+    // screen. ScaffoldMessenger.of(context) requires a mounted widget.
+    final messenger = ScaffoldMessenger.of(context);
+    ref
+        .read(strategyProvider.notifier)
+        .sendMessage(widget.taskId, widget.questionNumber, text)
+        .catchError((Object e) {
+      // The error is also recorded in the chat history by
+      // StrategyNotifier.sendMessage, but that record sits at the BOTTOM
+      // of the sheet — off-screen if the history is long. Pop a SnackBar
+      // at the top so the teacher immediately sees the failure.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('发送失败：$e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   @override
