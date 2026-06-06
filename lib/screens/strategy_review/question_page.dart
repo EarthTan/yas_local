@@ -107,6 +107,14 @@ class QuestionPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+          if (r.missingFromRubric)
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                '该题已从 rubric 中移除，原分数不再适用',
+                style: TextStyle(color: Colors.orange[800], fontSize: 12),
+              ),
+            ),
           if (hasStem)
             Container(
               width: double.infinity,
