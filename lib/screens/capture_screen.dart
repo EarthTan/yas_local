@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/submission.dart';
 import '../providers/task_provider.dart';
 import '../services/image_store.dart';
+import 'photo_picker_cap.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   final String taskId;
@@ -42,7 +43,21 @@ class _S extends ConsumerState<CaptureScreen> {
     try {
       final xs = await _picker.pickMultiImage(imageQuality: 85);
       if (xs.isNotEmpty && mounted) {
-        setState(() => _photos.addAll(xs.map((e) => File(e.path))));
+        final current = _photos.length;
+        final room = kMaxSubmissions - current;
+        if (room <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已达 $kMaxSubmissions 张上限')),
+          );
+          return;
+        }
+        final toAdd = xs.take(room).toList();
+        if (toAdd.length < xs.length) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已达 $kMaxSubmissions 张上限，仅添加 ${toAdd.length} 张')),
+          );
+        }
+        setState(() => _photos.addAll(toAdd.map((e) => File(e.path))));
       }
     } catch (e) {
       if (mounted) {
