@@ -333,7 +333,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.deepOrange,
                     ),
-                    onPressed: _showRegradeDialog,
+                    onPressed: _rerunInProgress ? null : _showRegradeDialog,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重新批改'),
                   ),
@@ -444,14 +444,7 @@ class _S extends ConsumerState<TaskDetailScreen> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              await ref
-                  .read(taskProvider.notifier)
-                  .resetGradingResults(widget.taskId);
-              if (!mounted) return;
-              ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
-            },
+            onPressed: _rerunInProgress ? null : () => _rerunAllGrading(ctx),
             child: const Text('立即重批'),
           ),
         ],
@@ -491,6 +484,24 @@ class _S extends ConsumerState<TaskDetailScreen> {
       await ref
           .read(jobQueueProvider.notifier)
           .startStrategy(widget.taskId, onlyQuestions: failedNums);
+    } finally {
+      if (mounted) setState(() => _rerunInProgress = false);
+    }
+  }
+
+  // Used by the "立即重批" dialog button. Pops the dialog and triggers a
+  // full regrade (resetGradingResults + startGrading), guarded by
+  // _rerunInProgress so rapid double-taps cannot queue a second run.
+  Future<void> _rerunAllGrading(BuildContext dialogCtx) async {
+    Navigator.of(dialogCtx).pop();
+    if (_rerunInProgress) return;
+    setState(() => _rerunInProgress = true);
+    try {
+      await ref
+          .read(taskProvider.notifier)
+          .resetGradingResults(widget.taskId);
+      if (!mounted) return;
+      ref.read(jobQueueProvider.notifier).startGrading(widget.taskId);
     } finally {
       if (mounted) setState(() => _rerunInProgress = false);
     }
