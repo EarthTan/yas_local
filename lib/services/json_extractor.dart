@@ -7,7 +7,17 @@ class JsonParseException implements Exception {
   final String message;
   final String rawContent;
 
-  const JsonParseException(this.message, {required this.rawContent});
+  /// Cleaned, truncated snippet of the LLM's output that failed to parse.
+  /// `null` when the cleaned text is empty (e.g. response was just
+  /// `<think>...</think>` with nothing after). The caller decides whether
+  /// to use a plain nudge in that case.
+  final String? cleanedSnippet;
+
+  const JsonParseException(
+    this.message, {
+    required this.rawContent,
+    this.cleanedSnippet,
+  });
 
   @override
   String toString() {
@@ -80,9 +90,13 @@ class JsonExtractor {
       builder.record('braces_object', ok: false, error: 'no { found');
       builder.markFailed('JsonParseException: no object found');
       builder.commit();
+      final snippet = cleaned.length > 300
+          ? '${cleaned.substring(0, 300)}…'
+          : (cleaned.isEmpty ? null : cleaned);
       throw JsonParseException(
         'No valid JSON object found in AI response.',
         rawContent: text,
+        cleanedSnippet: snippet,
       );
     } catch (e) {
       if (e is! JsonParseException) {
@@ -155,9 +169,13 @@ class JsonExtractor {
       builder.record('braces_list', ok: false, error: 'no [ found');
       builder.markFailed('JsonParseException: no list found');
       builder.commit();
+      final snippet = cleaned.length > 300
+          ? '${cleaned.substring(0, 300)}…'
+          : (cleaned.isEmpty ? null : cleaned);
       throw JsonParseException(
         'No valid JSON list found in AI response.',
         rawContent: text,
+        cleanedSnippet: snippet,
       );
     } catch (e) {
       if (e is! JsonParseException) {

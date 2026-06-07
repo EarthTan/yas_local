@@ -128,6 +128,35 @@ void main() {
         expect(e.message, isNotEmpty);
       }
     });
+
+    test('JsonParseException.cleanedSnippet strips <think> and truncates to 300 chars', () {
+      // Build a long bad output: 400 chars of garbage AFTER a think block, to
+      // exercise the truncation.
+      final long = '<think>internal reasoning</think>' + ('x' * 400);
+      try {
+        JsonExtractor.requireObject(long);
+        fail('应该 throw');
+      } on JsonParseException catch (e) {
+        expect(e.cleanedSnippet, isNotNull);
+        expect(e.cleanedSnippet!.length, lessThanOrEqualTo(301),  // 300 + ellipsis
+            reason: 'snippet must be truncated to 300 chars');
+        expect(e.cleanedSnippet, isNot(contains('<think>')),
+            reason: 'snippet must not include think block content');
+        expect(e.cleanedSnippet, startsWith('x'),
+            reason: 'snippet is the post-think garbage');
+      }
+    });
+
+    test('JsonParseException.cleanedSnippet is null when cleaned text is empty', () {
+      // Output is JUST a think block with nothing after — cleaned text is empty.
+      try {
+        JsonExtractor.requireObject('<think>only thinking, no output</think>');
+        fail('应该 throw');
+      } on JsonParseException catch (e) {
+        expect(e.cleanedSnippet, isNull,
+            reason: 'cleanedSnippet null when nothing left after stripping think');
+      }
+    });
   });
 
   // ── requireList ────────────────────────────────────────────────────────────
