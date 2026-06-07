@@ -9,6 +9,25 @@ class AppPrompts {
   static const String jsonRetryNudge =
       '\n\n注意：上一次返回的内容无法解析为 JSON，请只返回纯 JSON，不要任何解释或 <think> 内容。';
 
+  /// Builds a JSON-retry nudge that quotes a previous failure snippet so the
+  /// model can see what to fix. [snippet] is the cleaned+truncated text from
+  /// [JsonParseException.cleanedSnippet].
+  ///
+  /// Caller MUST ensure [snippet] is not student PII — `gradePaper` failures
+  /// contain student OCR text and are explicitly excluded from this path.
+  ///
+  /// The snippet is wrapped in a 4-backtick outer / 3-backtick inner fence
+  /// so:
+  ///   1. The model cannot "fix" it by inline-merging the snippet with its
+  ///      response.
+  ///   2. Triple backticks that the model may have emitted inside the
+  ///      snippet (e.g. ```json ... ```) do not break the outer fence.
+  static String jsonRetryNudgeWithSnippet(String snippet) =>
+      '\n\n注意：上一次返回的内容无法解析为 JSON。以下是模型上次原始输出（已截断，'
+      '请勿逐字复述，仅用于理解错误位置）：\n\n'
+      '````json\n$snippet\n````\n\n'
+      '请只返回纯 JSON，不要任何解释或 <think> 内容。';
+
   /// Shared output protocol used by all 4 LLM calls. Each call appends its
   /// own step 3 (the expected JSON schema) after this prefix.
   ///

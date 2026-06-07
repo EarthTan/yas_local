@@ -80,4 +80,35 @@ void main() {
       expect(text, isNot(contains('points 填 5')));
     });
   });
+
+  group('AppPrompts.jsonRetryNudgeWithSnippet', () {
+    test('wraps snippet in 4-backtick outer / 3-backtick inner fence', () {
+      final out = AppPrompts.jsonRetryNudgeWithSnippet('bad output here');
+      expect(out, contains('bad output here'),
+          reason: 'snippet text must appear in output');
+      expect(out, contains('````json'),
+          reason: 'must use 4-backtick outer fence so embedded 3-backticks '
+              'do not break the fence');
+      expect(out, contains('````'),
+          reason: 'must close the 4-backtick fence');
+      expect(out, contains('请勿逐字复述'),
+          reason: 'must include the do-not-copy disclaimer');
+      expect(out, contains('请只返回纯 JSON'),
+          reason: 'must include the base instruction');
+    });
+
+    test('snippet with embedded ``` does not break outer fence', () {
+      final out = AppPrompts.jsonRetryNudgeWithSnippet(
+          'here is ```json\n{broken\n```` which is bad');
+      // The 4-backtick outer fence must NOT be broken by the inner
+      // 3-backtick substring inside the snippet.
+      expect(out, contains('````json'),
+          reason: 'outer fence must remain intact');
+      // The closing outer fence must still be findable.
+      final outerOpen = out.indexOf('````json');
+      final outerClose = out.indexOf('````', outerOpen + 8);
+      expect(outerClose, greaterThan(outerOpen),
+          reason: 'outer fence closes after the open');
+    });
+  });
 }
